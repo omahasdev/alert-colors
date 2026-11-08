@@ -217,7 +217,8 @@ function Select-Place {
     # Shows the watched place of config.toml and lets the user search the region
     # tree of the API (no admin rights). Returns $true when config.toml changed.
     # The choice goes to the config of this PC, never into the project.
-    if (-not (Test-Path $VenvPython)) { Initialize-Venv }
+    # Out-Host: messages in a function would become part of its return value.
+    if (-not (Test-Path $VenvPython)) { Initialize-Venv | Out-Host }
     $created = -not (Test-Path $MachineConfig)
     if ($created) {
         New-Item -ItemType Directory -Force -Path (Split-Path $MachineConfig) | Out-Null
@@ -408,7 +409,9 @@ try {
     }
     if ($ConfigActions -contains $Action) { Write-Output "Config: $SourceConfig" }
     if (-not $Elevated -and $BuildActions -contains $Action) { Invoke-Build }
-    if (-not $Elevated -and $Action -eq 'install') { [void](Select-Place) }  # propose the place
+    # The first install proposes the place. After `setup.cmd region`, the config of this PC
+    # exists, and the install does not ask again.
+    if (-not $Elevated -and $Action -eq 'install' -and -not (Test-Path $MachineConfig)) { [void](Select-Place) }
     if (-not $Elevated -and $ConfigActions -contains $Action) { Test-Config }
     if ($AdminActions -contains $Action) {
         if (Test-Admin) { Invoke-AdminPart $Action }

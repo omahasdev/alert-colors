@@ -63,14 +63,17 @@ Run these commands in a Command Prompt (`cmd`):
 
 ```bat
 git clone https://github.com/omahasdev/alert-colors "%USERPROFILE%\alert-colors"
+"%USERPROFILE%\alert-colors\setup.cmd" region
 "%USERPROFILE%\alert-colors\setup.cmd" install
 ```
 
-The install asks three things:
+1. `region` chooses your city. If Python 3.14 is not installed, type **y** to
+   install it with `winget`. Then type a part of the city name ("dnipro" finds
+   "Дніпро"), and type its number. You can also choose a community, a district or an oblast.
+2. `install` builds, installs and starts the app. Accept the UAC prompt.
 
-1. If Python 3.14 is not installed, type **y** to install it with `winget`.
-2. Type a part of the name of your city or community ("dnipro" finds "Дніпро"), then type its number.
-3. Accept the UAC prompt.
+To change the city later, run the `region` command again. It applies the new
+city to the running app.
 
 Then, if you use ASUS devices, do this one time in Armoury Crate:
 

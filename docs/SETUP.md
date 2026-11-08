@@ -99,7 +99,7 @@ If Windows SmartScreen stops `setup.cmd`, click **More info**, then **Run anyway
 3. If the setup asks to install Python 3.14 with winget, type **y**, then press Enter.
 4. Wait for the build. The setup makes `.venv`, installs the pinned packages
    (exact versions with SHA-256 hashes), runs the tests, and builds the app in `dist\AlertColors`.
-5. When the setup shows "Watched place now", type a part of the name of your
+5. If this PC has no config yet, the setup shows "Watched place now". Type a part of the name of your
    city, community, district or oblast. Ukrainian and Latin letters both work.
 6. Type the number of your place in the list. To keep the test region, press Enter instead.
 7. Wait for `CHECK OK`. The setup fetches the alert status one time with your config.
@@ -142,14 +142,15 @@ The app starts automatically each time you log on.
 ## Choose your region
 
 The project `config.toml` watches the test region of the API (id `0`). To
-choose your place, run `setup.cmd` and choose **8**, or answer the question
-during Install:
+choose your place, run `setup.cmd region` (or choose **8** in the menu), or
+answer the question during the first install:
 
 1. Type a part of the name, in Ukrainian or Latin letters ("kharkiv" finds "Харків").
 2. Choose the number of the place in the list. Each line shows the place, its district and its oblast.
 3. If the app is installed, accept the UAC prompt. The setup then applies the new place.
 
-During Install, the setup asks this question in step 5.
+The first install asks this question in step 5. If you ran `setup.cmd region`
+before the install, the install does not ask again.
 
 You can choose a community (hromada), a district (raion) or an oblast. The
 setup writes three ids into `[source.vars]`:
