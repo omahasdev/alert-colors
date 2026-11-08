@@ -92,6 +92,17 @@ If your PC has only one lighting system, give it to the install:
 `setup.cmd install -Lighting razer_chroma` or `setup.cmd install -Lighting aura_sdk`.
 Without git, download the ZIP of the repository and extract it to the same folder.
 
+To uninstall, run this command, then accept the UAC prompt:
+
+```bat
+"%USERPROFILE%\alert-colors\setup.cmd" uninstall
+```
+
+It stops the app (the LEDs go back to their vendor apps), then removes the
+autostart, the Armoury Crate entry and the installed files. Then delete the
+folders `%USERPROFILE%\alert-colors` and `%APPDATA%\AlertColors` (the config of
+your PC). The full guide lists [all items that stay](docs/SETUP.md#maintain-update-restart-uninstall).
+
 **Full setup guide:** [docs/SETUP.md](docs/SETUP.md). It has the requirements,
 a step-by-step clean install, the modules for your PC, all `setup.cmd`
 actions, the config of your PC, every configuration key, the security model
