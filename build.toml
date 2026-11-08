@@ -1,0 +1,17 @@
+# Build profile: which optional modules go into AlertColors.exe.
+# The core is always included: the alert poller, the generic `json_http`
+# source, rules, scenes, and the `console` output (scenes go to the log).
+#
+# lighting: aura_sdk (ASUS Aura / Armoury Crate; needs admin), razer_chroma
+# sources:  siren_pp_ua (no key), ukrainealarm (official, key), ubilling,
+#           alerts_in_ua, alerts_com_ua  (presets of json_http)
+#
+# Examples:
+#   lighting = []                          API poller only
+#   lighting = ["razer_chroma"]            Razer only: runs without admin rights
+#
+# One build can override a list: setup.cmd build -Lighting none -Sources ubilling
+[build]
+name = "AlertColors"
+lighting = ["aura_sdk", "razer_chroma"]
+sources = ["siren_pp_ua", "ukrainealarm", "ubilling", "alerts_in_ua", "alerts_com_ua"]

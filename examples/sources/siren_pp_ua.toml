@@ -1,0 +1,13 @@
+# siren.pp.ua: public mirror of the official ukrainealarm.com API. No key.
+# City (hromada) level, with alert types. This is the default in config.toml.
+[source]
+type = "siren_pp_ua"
+poll_interval_s = 1           # each poll fetches only lastActionIndex (38 bytes); the mirror caches 1 s
+backoff_max_s = 60
+stale_after_s = 180
+
+[source.vars]
+region_id = "332"             # м. Дніпро та Дніпровська територіальна громада
+district_id = "44"            # its district (an alert there covers the city)
+oblast_id = "9"               # its oblast; alerts elsewhere in it give "partial"
+                              # all ids: https://siren.pp.ua/api/v3/regions

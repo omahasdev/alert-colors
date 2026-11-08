@@ -1,0 +1,203 @@
+# alert-colors configuration. All numbers, colors, API details and rules live here.
+# After a change: setup.cmd -> Restart.
+
+# ================================================================ source ====
+# Where the alert status comes from. `type` is a source module of this build:
+#   siren_pp_ua    https://siren.pp.ua           no key; mirror of the official API; city level, alert types
+#   ukrainealarm   https://api.ukrainealarm.com  official; API key; city level, alert types
+#   ubilling       https://ubilling.net.ua       no key; oblast level only
+#   alerts_in_ua   https://api.alerts.in.ua      token; city level, alert types
+#   alerts_com_ua  https://alerts.com.ua         no key; oblast level (data was frozen)
+#   json_http      any JSON API: you give all of [source.request] and [source.fields]
+# A preset fills in the request, fields, kinds and time; any table below
+# overrides its values. examples/sources/ has a complete block for each one.
+[source]
+type = "siren_pp_ua"          # the fastest source without a key (checked 2026-11-08)
+poll_interval_s = 1           # each poll fetches only lastActionIndex (38 bytes); the mirror caches 1 s
+backoff_max_s = 60            # after errors (for example HTTP 429), wait up to this long
+stale_after_s = 180           # older data shows the "unknown" scene, never "clear"
+
+# The watched place. The default is the test region of the API: choose your
+# place with setup.cmd (8). The choice goes to %APPDATA%\AlertColors\config.toml,
+# not into this file. Example: region_id "332", district_id "44", oblast_id "9"
+# is м. Дніпро та Дніпровська територіальна громада.
+[source.vars]                 # values for ${name} placeholders of the preset
+region_id = "0"               # Тестовий регіон
+district_id = "0"             # its district (an alert there covers the place)
+oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial"
+                              # all ids: https://siren.pp.ua/api/v3/regions
+
+# Network limits for the API (the app runs with admin rights). Defaults:
+# [source.request]
+# allow_http = false            # true: also allow http:// (no TLS)
+# allow_private_network = false # true: also allow LAN / localhost addresses
+# max_response_bytes = 1048576  # larger responses are refused
+
+# ================================================================= rules ====
+# Status -> scene. The first rule that matches wins, so the order is the priority.
+# Conditions (all optional): state ("ok" | "unknown"), active (true | false),
+# coverage ("none" | "partial" | "full"), kinds (any of a list).
+# Needed: one rule with state = "unknown", and a last rule with no conditions.
+# The states of the watched city, first match wins:
+#   unknown  no data, or data older than stale_after_s
+#   P        partial: no alert on the city, but one elsewhere in the oblast   orange
+#   R        an active alert on the city (level Red)                          red
+#   Y        a preliminary threat on the city (level Yellow only)             yellow
+#   N        no active alert                                                  green
+# The other kinds (nuclear, chemical, urban_fights, artillery) have their own colors.
+[[rules]]
+state = "unknown"
+scene = "unknown"
+
+[[rules]]
+coverage = "partial"          # before the kind rules: a partial status has no kinds of the city
+scene = "partial"
+
+[[rules]]
+kinds = ["nuclear"]
+scene = "nuclear"
+
+[[rules]]
+kinds = ["chemical"]
+scene = "chemical"
+
+[[rules]]
+kinds = ["urban_fights"]
+scene = "urban_fights"
+
+[[rules]]
+kinds = ["artillery"]
+scene = "artillery"
+
+[[rules]]
+kinds = ["air_raid", "other"] # R: before Y, so a red alert wins over a threat
+scene = "alert"
+
+[[rules]]
+kinds = ["threat"]            # Y: preliminary threat
+scene = "threat"
+
+[[rules]]
+active = true                 # any other active alert
+scene = "alert"
+
+[[rules]]
+scene = "clear"               # N: no conditions, everything else
+
+# ================================================================ scenes ====
+# Each scene runs one effect, or gives the LEDs back (release = true).
+# Effects and options (brightness values are 0..1):
+#   solid  color, brightness
+#   pulse  color, period_s, min_brightness, max_brightness
+#   blink  color, period_s, duty, brightness, off_color
+[scenes.clear]                # N: no active alert
+effect = "solid"
+color = "#00FF00"
+brightness = 0.15             # dim, steady
+# release = true              # instead: each backend gives its LEDs back to its vendor app
+
+[scenes.unknown]
+effect = "pulse"
+color = "#8000FF"
+period_s = 3.0
+min_brightness = 0.1
+max_brightness = 1.0
+
+[scenes.alert]                # R: active alert
+effect = "pulse"
+color = "#FF0000"
+period_s = 1.5
+min_brightness = 0.5          # never darker than 50 %
+max_brightness = 1.0
+
+[scenes.partial]              # P: alert elsewhere in the oblast
+effect = "solid"
+color = "#FF4000"             # on LEDs, more green than this looks yellow
+brightness = 0.2
+
+[scenes.threat]               # Y: preliminary threat
+effect = "pulse"
+color = "#FFC800"
+period_s = 1.5
+min_brightness = 0.5
+max_brightness = 1.0
+
+[scenes.artillery]
+effect = "pulse"
+color = "#FF2000"
+period_s = 1.0
+min_brightness = 0.5
+max_brightness = 1.0
+
+[scenes.urban_fights]
+effect = "pulse"
+color = "#FF0040"
+period_s = 0.8
+min_brightness = 0.5
+max_brightness = 1.0
+
+[scenes.chemical]
+effect = "pulse"
+color = "#A0FF00"
+period_s = 1.0
+min_brightness = 0.5
+max_brightness = 1.0
+
+[scenes.nuclear]
+effect = "pulse"
+color = "#FFFFFF"
+period_s = 0.8
+min_brightness = 0.5
+max_brightness = 1.0
+
+# =============================================================== display ====
+[display]
+brightness = 1.0              # global factor for every color
+frame_interval_s = 0.1        # one Aura apply of all LEDs takes less than 0.1 s
+backend_retry_s = 30          # after a backend error, wait this long before retry
+backend_close_timeout_s = 90  # on exit, wait this long for each backend to release;
+                              # the ASUS service needed 44 s for one release (2026-11-08)
+
+# ============================================================== lighting ====
+# Each [[lighting]] entry is one backend. `type` selects a registered backend.
+# `brightness` (optional) is a factor for this backend only.
+# `color_correction` (optional) = [r, g, b] factors 0..1 for the LEDs of this backend.
+[[lighting]]
+type = "aura_sdk"             # ASUS Aura / Armoury Crate; needs admin for MB + ARGB
+enabled = true
+brightness = 1.0
+# Factors [r, g, b] for these LEDs: their green chip is brighter than the red one,
+# so orange looked yellow. Start values: FastLED "TypicalLEDStrip" correction.
+color_correction = [1.0, 0.69, 0.94]
+include = ["*"]               # device-name patterns, for example "Mainboard*", "AddressableStrip *"
+
+[[lighting]]
+type = "razer_chroma"         # Razer Synapse / Chroma SDK REST server
+enabled = true
+brightness = 1.0
+url = "http://localhost:54235/razer/chromasdk"
+devices = ["keyboard", "mouse"]
+app_title = "alert-colors"
+heartbeat_interval_s = 5      # the SDK drops a session after 15 s without requests
+init_delay_s = 1.5
+timeout_s = 5
+
+# ================================================================ tuning ====
+# configure.cmd (the configurator) writes this file; the running app reloads it
+# within check_interval_s. It may change scenes, brightness and color correction
+# only (see src/alert_colors/tuning.py). Remove the section to turn tuning off.
+[tuning]
+file = '%ProgramData%\AlertColors\tuning.json'
+check_interval_s = 1
+
+# =============================================================== service ====
+[service]
+# `setup.cmd` stops the app through this event. The app releases the LEDs, then exits.
+stop_event = 'Local\AlertColors.Stop'   # TOML literal string: the backslash stays as is
+
+# =============================================================== logging ====
+[logging]
+level = "INFO"
+file = "alert-colors.log"     # relative to this file's folder
+max_bytes = 1048576
+backups = 3

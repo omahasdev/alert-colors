@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alert Colors Configurator</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#dddcd6; --accent:#2457d6; --ok:#1f7a3a; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#21211f; --ink:#ecebe6; --muted:#a3a29b; --line:#3a3936; --accent:#7aa2ff; --ok:#6cc58a; --err:#ff8a80; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:2; background:var(--bg); border-bottom:1px solid var(--line); padding:12px 16px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  main { max-width:1100px; margin:0 auto; padding:16px; display:grid; gap:12px; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:15px; margin:0 0 2px; display:flex; align-items:center; gap:8px; }
+  .used { color:var(--muted); font-size:12px; margin-bottom:10px; }
+  .now { font-size:11px; background:var(--accent); color:#fff; border-radius:9px; padding:1px 7px; }
+  .swatch { width:14px; height:14px; border-radius:50%; border:1px solid var(--line); display:inline-block; }
+  label.row { display:grid; grid-template-columns:120px minmax(0, 1fr); gap:8px; align-items:center; margin:6px 0; }
+  label.row span { color:var(--muted); font-size:12px; }
+  .ctl { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  input[type=range] { flex:1; min-width:90px; }
+  input[type=number] { width:76px; }
+  select { width:100%; min-width:0; text-overflow:ellipsis; }
+  input, select, button { font:inherit; color:inherit; }
+  input[type=number], select { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:3px 6px; }
+  button { background:var(--card); border:1px solid var(--line); border-radius:7px; padding:5px 11px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  .actions { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  #msg { margin-left:auto; font-size:13px; }
+  #msg.ok { color:var(--ok); } #msg.err { color:var(--err); }
+  .wide { grid-column:1 / -1; }
+  .mini { padding:1px 7px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Alert Colors</h1>
+  <button class="primary" id="apply">Apply now</button>
+  <button id="reload">Reload</button>
+  <button id="reset" title="Remove all live tuning: config.toml values apply">Reset to config</button>
+  <button id="quit">Close</button>
+  <span id="msg"></span>
+</header>
+<main id="main"></main>
+<script>
+"use strict";
+const TOKEN = location.hash.slice(1);
+const PREVIEW_SECONDS = 10;
+let state = null;          // from /api/state
+let specs = {};            // effect name -> spec
+const scenes = {};         // scene name -> current form values
+
+function msg(text, ok) { const m = document.getElementById("msg"); m.textContent = text; m.className = ok ? "ok" : "err"; }
+
+async function api(path, body) {
+  const options = { headers: { "X-Token": TOKEN, "Content-Type": "application/json" } };
+  if (body !== undefined) { options.method = "POST"; options.body = JSON.stringify(body); }
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(data.message || response.statusText);
+  return data;
+}
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "on") for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
+    else if (v !== undefined && v !== null) node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+function numberControl(param, value, onChange) {
+  const step = param.step || (param.kind === "int" ? 1 : 0.01);
+  const range = el("input", { type: "range", min: param.min ?? 0, max: param.max ?? 10, step, value });
+  const number = el("input", { type: "number", min: param.min, max: param.max, step, value });
+  const parse = v => param.kind === "int" ? parseInt(v, 10) : parseFloat(v);
+  range.addEventListener("input", () => { number.value = range.value; onChange(parse(range.value)); });
+  number.addEventListener("change", () => { range.value = number.value; onChange(parse(number.value)); });
+  return el("div", { class: "ctl" }, range, number);
+}
+
+function colorsControl(value, onChange) {
+  const box = el("div", { class: "ctl" });
+  const list = [...value];
+  const render = () => {
+    box.replaceChildren();
+    list.forEach((c, i) => {
+      box.append(el("input", { type: "color", value: c, on: { input: e => { list[i] = e.target.value.toUpperCase(); onChange([...list]); } } }));
+      box.append(el("button", { class: "mini", title: "Remove", on: { click: () => { list.splice(i, 1); render(); onChange([...list]); } } }, "−"));
+    });
+    box.append(el("button", { class: "mini", title: "Add a color", on: { click: () => { list.push("#FFFFFF"); render(); onChange([...list]); } } }, "+"));
+  };
+  render();
+  return box;
+}
+
+function control(param, value, onChange) {
+  switch (param.kind) {
+    case "color": return el("input", { type: "color", value, on: { input: e => onChange(e.target.value.toUpperCase()) } });
+    case "colors": return colorsControl(value, onChange);
+    case "bool": { const c = el("input", { type: "checkbox", on: { change: e => onChange(e.target.checked) } }); c.checked = !!value; return c; }
+    case "choice": {
+      const s = el("select", { on: { change: e => onChange(e.target.value) } }, ...param.choices.map(o => el("option", { value: o }, o)));
+      s.value = value; return s;
+    }
+    default: return numberControl(param, value, onChange);
+  }
+}
+
+function swatchColor(def) { return def.color || (def.colors && def.colors[0]) || "#000000"; }
+
+function sceneCard(name) {
+  const card = el("section", { class: "card" });
+  const draw = () => {
+    const def = scenes[name];
+    const head = el("h2", {}, el("span", { class: "swatch", style: `background:${def.release ? "transparent" : swatchColor(def)}` }), name);
+    if (state.current_scene === name) head.append(el("span", { class: "now" }, "now"));
+    card.replaceChildren(head, el("div", { class: "used" }, "Used when: " + (state.used_by[name] || ["no rule"]).join(" | ")));
+    const effectSelect = el("select", { on: { change: e => {
+      const next = e.target.value;
+      if (next === "release") scenes[name] = { release: true };
+      else {
+        const fresh = { effect: next };
+        for (const p of specs[next].params) fresh[p.name] = (p.name in def) ? def[p.name] : p.default;
+        scenes[name] = fresh;
+      }
+      draw();
+    } } }, el("option", { value: "release" }, "Release: give the LEDs back to each vendor app"),
+       ...Object.values(specs).map(s => el("option", { value: s.name }, s.title)));
+    effectSelect.value = def.release ? "release" : def.effect;
+    card.append(el("label", { class: "row" }, el("span", {}, "effect"), effectSelect));
+    if (!def.release) {
+      for (const param of specs[def.effect].params) {
+        const value = (param.name in def) ? def[param.name] : param.default;
+        const row = el("label", { class: "row", title: param.help }, el("span", {}, param.name),
+          control(param, value, v => { scenes[name][param.name] = v; if (param.kind === "color" || param.kind === "colors") head.firstChild.style.background = swatchColor(scenes[name]); }));
+        card.append(row);
+      }
+    }
+    card.append(el("div", { class: "actions" },
+      el("button", { disabled: def.release ? "" : null, on: { click: () => preview(name) } }, `Preview ${PREVIEW_SECONDS} s`),
+      el("button", { on: { click: () => { scenes[name] = structuredClone(state.base_scenes[name]); draw(); } } }, "Config value")));
+  };
+  draw();
+  return card;
+}
+
+function globalCard() {
+  const card = el("section", { class: "card wide" }, el("h2", {}, "Brightness and color correction"),
+    el("div", { class: "used" }, "Global brightness scales every color. Each backend has its own brightness and [r, g, b] correction."));
+  card.append(el("label", { class: "row" }, el("span", {}, "global"),
+    numberControl({ kind: "float", min: 0, max: 1, step: 0.05 }, state.brightness, v => state.brightness = v)));
+  for (const [type, t] of Object.entries(state.lighting)) {
+    card.append(el("label", { class: "row" }, el("span", {}, `${type} brightness`),
+      numberControl({ kind: "float", min: 0, max: 1, step: 0.05 }, t.brightness, v => t.brightness = v)));
+    ["red", "green", "blue"].forEach((channel, i) => card.append(el("label", { class: "row" }, el("span", {}, `${type} ${channel}`),
+      numberControl({ kind: "float", min: 0, max: 1, step: 0.01 }, t.color_correction[i], v => t.color_correction[i] = v))));
+  }
+  return card;
+}
+
+function render() {
+  specs = Object.fromEntries(state.schema.map(s => [s.name, s]));
+  for (const [name, def] of Object.entries(state.scenes)) scenes[name] = structuredClone(def);
+  const main = document.getElementById("main");
+  main.replaceChildren(globalCard(), ...Object.keys(state.scenes).map(sceneCard));
+}
+
+function payload() { return { scenes, brightness: state.brightness, lighting: state.lighting }; }
+
+async function load() {
+  try { state = await api("/api/state"); render(); msg(`Tuning file: ${state.tuning_file}`, true); }
+  catch (e) { msg(e.message, false); }
+}
+async function run(path, body) { try { msg((await api(path, body)).message, true); } catch (e) { msg(e.message, false); } }
+async function preview(name) { await run("/api/preview", { scene: name, scene_definition: scenes[name], seconds: PREVIEW_SECONDS }); }
+
+document.getElementById("apply").addEventListener("click", () => run("/api/apply", payload()));
+document.getElementById("reload").addEventListener("click", load);
+document.getElementById("reset").addEventListener("click", async () => { await run("/api/reset", {}); await load(); });
+document.getElementById("quit").addEventListener("click", async () => { await run("/api/quit", {}); document.body.replaceChildren(el("main", {}, el("p", {}, "The configurator is closed. You can close this tab."))); });
+load();
+</script>
+</body>
+</html>

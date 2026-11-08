@@ -1,0 +1,33 @@
+# Any JSON API, with no preset: give the request and the JMESPath fields.
+# This example is the ubilling feed written out in full.
+[source]
+type = "json_http"
+poll_interval_s = 1
+backoff_max_s = 60
+stale_after_s = 180
+
+[source.vars]
+region = "Дніпропетровська область"
+
+[source.request]
+url = "https://ubilling.net.ua/aerialalerts/"
+method = "GET"
+timeout_s = 10
+headers = {}                  # for example { Authorization = "Bearer ${env:MY_TOKEN}" }
+params = {}
+
+[source.fields]               # JMESPath, https://jmespath.org
+full = 'states."${region}".alertnow'
+# partial = '...'
+# kinds = '...'
+observed_at = 'cachedat'
+changed_at = 'states."${region}".changed'
+
+[source.kinds]
+default = "air_raid"
+# unmapped = "other"
+map = {}
+
+[source.time]
+format = "%Y-%m-%d %H:%M:%S"
+timezone = "Europe/Kyiv"

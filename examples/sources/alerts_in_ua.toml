@@ -1,0 +1,12 @@
+# alerts.in.ua: city level, with alert types. Replace the [source] block of config.toml.
+# Put the token (https://devs.alerts.in.ua) in the environment variable ALERTS_IN_UA_TOKEN.
+[source]
+type = "alerts_in_ua"
+poll_interval_s = 15          # the API allows few requests
+backoff_max_s = 300
+stale_after_s = 180
+
+[source.vars]                 # location_uid values from the alerts.in.ua documentation
+city_uid = "<city location_uid>"
+raion_uid = "<raion location_uid>"
+oblast_uid = "<oblast location_uid>"
