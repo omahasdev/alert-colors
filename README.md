@@ -55,9 +55,12 @@ tells [which modules your PC needs](docs/SETUP.md#2-choose-the-modules).
 | `siren_pp_ua` (default) | Ukrainian air-raid alerts, community (hromada) level, from a public mirror of the official API. The fastest source without an API key | No |
 | `ukrainealarm` | The same data from the official ukrainealarm.com API | Yes |
 | `alerts_in_ua` | Alerts from alerts.in.ua, community (hromada) level | Yes (a token) |
-| `ubilling` | Alerts from ubilling.net.ua, oblast level only. A fallback | No |
+| `ubilling` | Alerts from ubilling.net.ua, oblast level only. A good fallback source | No |
 | `alerts_com_ua` | Alerts from alerts.com.ua, oblast level only. The service stopped updating its data (checked 2026-11-08) | No |
 | `json_http` (always in the build) | Any other JSON API, configured in `config.toml`. Each source above is a preset of it | Only if that API needs one |
+
+A second source can keep the LEDs correct when the first server is down: see
+[Failover](docs/SETUP.md#configuration) in the full guide.
 
 ## Minimal setup
 
@@ -183,7 +186,8 @@ Blue boxes are the exchangeable modules: sources and lighting. Gray boxes are th
 | Module | Primary class | What it does |
 |---|---|---|
 | `sources/` | `AlertSource` | `fetch()` gives an `AlertStatus` |
-| `sources/json_http.py` | (core) | Any JSON API from the config, with JMESPath fields |
+| `sources/json_http.py` | `JsonHttpSource` | Any JSON API from the config, with JMESPath fields |
+| `sources/failover.py` | `FailoverSource` | `[source]` first, then the fallback sources of `[failover]` when it has no data |
 | `sources/siren_pp_ua.py`, `ukrainealarm.py`, `ubilling.py`, `alerts_in_ua.py`, `alerts_com_ua.py` | (presets, no class) | Optional named defaults for known APIs |
 | `policy.py` | `Policy` | Ordered rules: `AlertStatus` to a scene name |
 | `scenes.py` | `Scene` | An effect, or a release: each backend gives its LEDs back to its vendor app |

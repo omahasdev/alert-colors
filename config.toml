@@ -33,6 +33,32 @@ oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial
 # allow_private_network = false # true: also allow LAN / localhost addresses
 # max_response_bytes = 1048576  # larger responses are refused
 
+# ============================================================== failover ====
+# Fallback sources: the app reads them when [source] has no data, for example
+# when its server is down. Without [[failover.sources]], the app reads only
+# [source]. Each entry takes the keys of [source]; it gets the [source.vars]
+# of [source], and its own [failover.sources.vars] replace single values.
+# The rules (see src/alert_colors/sources/failover.py):
+# - [source] is always the first choice; HTTP 429 never switches.
+# - A fallback is used when [source] had no success for after_s.
+# - After a failure, a source is skipped for retry_s, doubled each time up to
+#   retry_max_s. So the app tries [source] again, and goes back to it when it works.
+[failover]
+after_s = 30                  # must be less than stale_after_s, or the LEDs show "unknown" first
+retry_s = 10                  # less than after_s: one timeout of [source] does not switch
+retry_max_s = 120
+
+# ubilling: no key, but oblast level only. While it is in use, an alert
+# anywhere in the oblast shows the "alert" scene (red), never "partial".
+# Set `region` to the oblast name as the feed spells it
+# (https://ubilling.net.ua/aerialalerts/). After you choose a place in another
+# oblast, change it here too: `setup.cmd` checks it before each install.
+# [[failover.sources]]
+# type = "ubilling"
+# poll_interval_s = 10        # fetch this fallback at most this often
+# [failover.sources.vars]
+# region = "Київська область"
+
 # ================================================================= rules ====
 # Status -> scene. The first rule that matches wins, so the order is the priority.
 # Conditions (all optional): state ("ok" | "unknown"), active (true | false),

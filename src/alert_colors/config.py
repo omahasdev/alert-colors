@@ -19,6 +19,7 @@ from .policy import Policy
 from .scenes import Scene, build_scenes
 from .tuning import TuningWatcher, resolve_path
 from .sources import SOURCES, AlertSource
+from .sources.failover import FailoverSource, Member
 
 DEFAULT_CONFIG = Path("config.toml")
 # Take the LEDs again (see power_events.py): for a config without these keys.
@@ -28,6 +29,11 @@ DEFAULT_RECLAIM_STEP_S = 5.0
 # A new process with one of these names takes the LEDs back (see process_events.py).
 DEFAULT_VENDOR_PROCESSES = ("ArmouryCrate.exe", "LightingService.exe", "AacAmbientLighting.exe")
 DEFAULT_VENDOR_POLL_S = 2.0
+# [failover] (see sources/failover.py): for a config without these keys.
+DEFAULT_FAILOVER_AFTER_S = 30.0  # well below stale_after_s: the LEDs never show "unknown" first
+DEFAULT_FAILOVER_RETRY_S = 10.0  # below after_s: one timeout of the primary does not switch
+DEFAULT_FAILOVER_RETRY_MAX_S = 120.0
+DEFAULT_FALLBACK_POLL_S = 10.0
 log = logging.getLogger(__name__)
 
 
@@ -42,8 +48,48 @@ class App:
             return cls(tomllib.load(f), path.resolve().parent)
 
     def source(self) -> AlertSource:
+        """The primary source: [source]."""
         section = self.raw["source"]
         return SOURCES.create(section["type"], section)
+
+    def fallback_entries(self) -> list[dict[str, Any]]:
+        """The [[failover.sources]] entries whose module is in this build.
+
+        Each entry gets the [source.vars] of the primary source, and its own
+        `vars` replace single values. Thus a fallback with the same region IDs
+        needs no `vars`.
+        """
+        shared_vars = self.raw["source"].get("vars", {})
+        entries = []
+        for entry in self.raw.get("failover", {}).get("sources", []):
+            if not entry.get("enabled", True):
+                continue
+            if entry["type"] not in SOURCES.names():
+                log.warning("fallback source %r is not in this build (sources: %s); skipped",
+                            entry["type"], ", ".join(SOURCES.names()))
+                continue
+            entries.append({**entry, "vars": {**shared_vars, **entry.get("vars", {})}})
+        return entries
+
+    def fallback_sources(self) -> list[AlertSource]:
+        return [SOURCES.create(entry["type"], entry) for entry in self.fallback_entries()]
+
+    def alert_source(self) -> AlertSource:
+        """The source of the daemon: the primary, with the fallbacks of [failover] if any."""
+        primary = self.source()
+        entries = self.fallback_entries()
+        if not entries:
+            return primary  # no [failover]: the same as before
+        failover = self.raw["failover"]
+        return FailoverSource(
+            primary=Member(primary),
+            fallbacks=[Member(SOURCES.create(e["type"], e),
+                              poll_interval_s=float(e.get("poll_interval_s", DEFAULT_FALLBACK_POLL_S)))
+                       for e in entries],
+            after_s=float(failover.get("after_s", DEFAULT_FAILOVER_AFTER_S)),
+            retry_s=float(failover.get("retry_s", DEFAULT_FAILOVER_RETRY_S)),
+            retry_max_s=float(failover.get("retry_max_s", DEFAULT_FAILOVER_RETRY_MAX_S)),
+        )
 
     def scenes(self) -> dict[str, Scene]:
         return build_scenes(self.raw["scenes"])
@@ -71,6 +117,11 @@ class App:
 
     def settings(self) -> DaemonSettings:
         source, display = self.raw["source"], self.raw["display"]
+        after_s = float(self.raw.get("failover", {}).get("after_s", DEFAULT_FAILOVER_AFTER_S))
+        if self.raw.get("failover", {}).get("sources") and after_s >= float(source["stale_after_s"]):
+            raise ValueError(f"[failover] after_s ({after_s}) must be less than "
+                             f"[source] stale_after_s ({source['stale_after_s']}), "
+                             "or the LEDs show 'unknown' before a fallback is used")
         return DaemonSettings(
             poll_interval_s=float(source["poll_interval_s"]),
             stale_after_s=float(source["stale_after_s"]),
@@ -116,7 +167,7 @@ class App:
     def daemon(self, dry_run: bool = False) -> Daemon:
         outputs = self.outputs(dry_run)
         return Daemon(
-            source=self.source(),
+            source=self.alert_source(),
             policy=self.policy(),
             scenes=self.scenes(),
             outputs=outputs,

@@ -271,6 +271,41 @@ an official key, switch to `ukrainealarm` (same API, the key in
 An expression that gives no value (for example, a wrong region name) is an
 error, and the LEDs show `unknown`. It is never read as "no alert".
 
+**Failover.** A fallback source keeps the LEDs correct when the server of
+`[source]` is down. `[[failover.sources]]` lists the fallbacks in order. Each
+entry takes the keys of `[source]`, and gets the `[source.vars]` of `[source]`.
+Its own `[failover.sources.vars]` replace single values. Without
+`[[failover.sources]]`, the app reads only `[source]`, as before.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `[failover] after_s` | 30 | Use a fallback when `[source]` had no success for this long. It must be less than `stale_after_s` |
+| `[failover] retry_s` | 10 | After a failure, skip the source for this long. Keep it less than `after_s`, so that one timeout does not switch |
+| `[failover] retry_max_s` | 120 | The skip time doubles after each failure in a row, up to this value |
+| `poll_interval_s` in an entry | 10 | Fetch this fallback at most this often. Between fetches, the app uses its last status |
+
+`[source]` is always the first choice. HTTP 429 never switches to a fallback:
+the server works, and the app keeps the last status. While a fallback is in use,
+the app tries `[source]` again after each skip time, and goes back to it when it
+works. The log shows `using fallback <name>` and `<name> works again`.
+
+Example: `ubilling` as the fallback of `siren_pp_ua`. It needs no key, but it
+has oblast level only. While it is in use, an alert anywhere in the oblast
+shows the `alert` scene, never `partial`. The `region` value is the oblast name
+as the feed spells it:
+
+```toml
+[[failover.sources]]
+type = "ubilling"
+poll_interval_s = 10
+[failover.sources.vars]
+region = "Київська область"
+```
+
+`setup.cmd region` changes only `[source.vars]`. If you choose a place in
+another oblast, change `region` of the fallback too. A wrong name fails the
+check before each install, and it never shows "no alert".
+
 **Rules.** `[[rules]]` select the scene. The first rule that matches wins, so
 the order is the priority. Conditions: `state` (`ok` / `unknown`), `active`,
 `coverage` (`none` / `partial` / `full`), `kinds` (any of a list). The config
@@ -385,7 +420,7 @@ The first change makes the backup `ProcessList.ini.alert-colors.bak`.
 | The PC LEDs do not change | Wait 30 s after a start. Make sure that **AlertColors.exe** is at the top of the Armoury Crate priority list, and that **In-Game lighting effects** is on. |
 | Armoury Crate does not find its devices | The app was killed (see [Stop](#stop-never-kill-the-app)). Run `Restart-Service LightingService -Force` in an admin PowerShell, then restart Armoury Crate. |
 | The Razer devices do not change | Make sure that Synapse runs and that Chroma apps are allowed in Synapse. The log shows `backend razer_chroma failed` with the cause. |
-| The LEDs breathe purple (`unknown`) | The app has no fresh data. Make sure that the PC has internet access, then look at the log for the error. |
+| The LEDs breathe purple (`unknown`) | The app has no fresh data. Make sure that the PC has internet access, then look at the log for the error. If the server of the source is down, add a fallback source (see **Failover** in [Configuration](#configuration)). |
 | The log shows HTTP 429 | The API limits the request rate. The app waits and tries again: with siren.pp.ua, approximately one poll in 15 s gets 429. Do not run two copies of the app. |
 | `CHECK FAILED` in the setup | The console shows the cause. The old app runs unchanged. Correct the config, then run the action again. |
 | An error every 30 s for a module that you do not use | Set `enabled = false` in its `[[lighting]]` entry, or build without it (see [Choose the modules](#2-choose-the-modules)). |

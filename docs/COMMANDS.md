@@ -65,8 +65,8 @@ Without `--config`, the exe reads `config.toml` in the current folder.
 |---|---|---|
 | `run [--dry-run]` | Watch the alerts and drive the LEDs. The logon task runs this command. `--dry-run` logs the colors and does not use the hardware | 0 after a stop |
 | `stop` | Ask the running app to release the LEDs and exit. Use this command, never a kill | 0: stop sent. 1: no app runs |
-| `check` | Load the config, build all parts, fetch the source one time | 0: OK. 1: an error |
-| `status` | Fetch the alert status one time, then print it and the scene | 0: fetched. Not 0: the fetch failed |
+| `check` | Load the config, build all parts, fetch each source one time: `[source]`, then each fallback of `[failover]`. A config error in any source fails the check. A server that does not answer fails it only when no source gives a status | 0: OK. 1: an error |
+| `status` | Fetch the alert status one time, then print it and the scene. With fallback sources, it does this for each source | 0: fetched. Not 0: the fetch failed (with fallbacks: all sources failed) |
 | `devices` | List the devices of each enabled lighting backend. `[x]` marks the devices that the config includes | 0 |
 | `preview <scene> --seconds <n>` | Show one scene on the hardware for `n` seconds, then release the LEDs | 0. 1: the scene only releases the LEDs |
 | `tune [--no-browser]` | Start the configurator on `127.0.0.1` and open it in the browser. `--no-browser` prints the URL only | 0 |

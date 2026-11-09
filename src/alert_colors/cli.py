@@ -109,19 +109,41 @@ def _fetch_with_retry(source):  # noqa: ANN001, ANN202
 
 
 def _check(app: App, args: argparse.Namespace) -> int:
-    """The gate before an install: a config that cannot fetch is never deployed."""
+    """The gate before an install: a config that cannot fetch is never deployed.
+
+    Each source is fetched once: the primary, then each fallback of [failover].
+    A config error in any source fails the check. A network error (the server
+    is down) fails the check only when no source gives a status: the install
+    of a fallback must be possible while the primary server is down.
+    """
     try:
         scenes = app.scenes()
         policy = app.policy()
         app.settings()
         entries = app.lighting_entries()
-        source = app.source()
-        status = _fetch_with_retry(source)
+        sources = [app.source(), *app.fallback_sources()]
     except Exception as error:  # noqa: BLE001  report every kind of config fault
         print(f"CHECK FAILED: {type(error).__name__}: {error}")
         return 1
-    print(f"source {source.name}: {status}")
-    print(f"scene: {policy.select(status)} (scenes: {len(scenes)}, lighting: "
+    first_status = None
+    for source in sources:
+        try:
+            status = _fetch_with_retry(source)
+        except OSError as error:  # the network or the server: maybe another source works
+            if len(sources) == 1:
+                print(f"CHECK FAILED: {type(error).__name__}: {error}")
+                return 1
+            print(f"source {source.name}: NOT REACHABLE: {type(error).__name__}: {error}")
+            continue
+        except Exception as error:  # noqa: BLE001  a config fault: never deploy it
+            print(f"CHECK FAILED: source {source.name}: {type(error).__name__}: {error}")
+            return 1
+        print(f"source {source.name}: {status}")
+        first_status = first_status or status
+    if first_status is None:
+        print("CHECK FAILED: no source gives a status")
+        return 1
+    print(f"scene: {policy.select(first_status)} (scenes: {len(scenes)}, lighting: "
           f"{', '.join(e['type'] for e in entries) or 'none'})")
     print("CHECK OK")
     return 0
@@ -188,10 +210,23 @@ def _ask_place(all_places):  # noqa: ANN001, ANN202
 
 
 def _status(app: App, args: argparse.Namespace) -> int:
-    status = app.source().fetch()
-    print(status)
-    print("scene:", app.policy().select(status))
-    return 0
+    fallbacks = app.fallback_sources()
+    if not fallbacks:  # no [failover]: the same output as before
+        status = app.source().fetch()
+        print(status)
+        print("scene:", app.policy().select(status))
+        return 0
+    policy, any_ok = app.policy(), False
+    for source in [app.source(), *fallbacks]:
+        try:
+            status = source.fetch()
+        except Exception as error:  # noqa: BLE001  show each source
+            print(f"source {source.name}: FAILED: {type(error).__name__}: {error}")
+            continue
+        print(f"source {source.name}: {status}")
+        print(f"  scene: {policy.select(status)}")
+        any_ok = True
+    return 0 if any_ok else 1
 
 
 def _devices(app: App, args: argparse.Namespace) -> int:
