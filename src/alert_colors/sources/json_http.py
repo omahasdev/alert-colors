@@ -52,6 +52,8 @@ from .base import SOURCES
 ISO = "iso"
 EPOCH = "epoch"
 ISO_UTC_SUFFIX = "Z"
+# Forms that "iso" also accepts: meta.last_updated_at of alerts.in.ua is "2026/11/08 11:05:00 +0000".
+ISO_LIKE_FORMATS = ("%Y/%m/%d %H:%M:%S %z",)
 
 
 class FieldError(ValueError):
@@ -87,10 +89,23 @@ class TimeParser:
             return datetime.fromtimestamp(float(raw), UTC)
         text = str(raw)
         if self.format == ISO:
-            value = datetime.fromisoformat(text.replace(ISO_UTC_SUFFIX, "+00:00"))
+            value = _parse_iso(text)
         else:
             value = datetime.strptime(text, self.format)
         return value if value.tzinfo else value.replace(tzinfo=self.timezone)
+
+
+
+def _parse_iso(text: str) -> datetime:
+    try:
+        return datetime.fromisoformat(text.replace(ISO_UTC_SUFFIX, "+00:00"))
+    except ValueError:
+        for form in ISO_LIKE_FORMATS:
+            try:
+                return datetime.strptime(text, form)
+            except ValueError:
+                continue
+        raise
 
 
 @dataclass

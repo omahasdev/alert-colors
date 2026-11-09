@@ -50,9 +50,10 @@ def test_wrong_region_is_an_error_not_clear():
 
 
 # ---- the example: alerts.in.ua ---------------------------------------------
-def alert(uid, kind="air_raid", oblast=OBLAST):
-    return {"location_uid": uid, "location_oblast_uid": int(oblast), "alert_type": kind,
-            "started_at": "2026-11-08T11:00:00.000Z"}
+def alert(uid, kind="air_raid", oblast=REGION):
+    """The live shape: location_oblast_uid is the UID of the place itself, not of its oblast."""
+    return {"location_uid": uid, "location_oblast_uid": int(uid), "location_oblast": oblast,
+            "alert_type": kind, "started_at": "2026-11-08T11:00:00.000Z"}
 
 
 @pytest.fixture(autouse=True)
@@ -63,20 +64,22 @@ def token(monkeypatch):
 
 def alerts_in_ua(*alerts):
     source = source_from(ROOT / "examples" / "sources" / "alerts_in_ua.toml",
-                         city_uid=CITY, raion_uid=RAION, oblast_uid=OBLAST)
+                         city_uid=CITY, raion_uid=RAION, oblast_uid=OBLAST, oblast_name=REGION)
     return source.parse({"alerts": list(alerts), "meta": {"last_updated_at": "2026-11-08T11:05:00Z"}})
 
 
 def test_alerts_in_ua_coverage():
     assert alerts_in_ua(alert(RAION)).coverage is Coverage.FULL
     assert alerts_in_ua(alert(OTHER_RAION)).coverage is Coverage.PARTIAL
-    assert alerts_in_ua(alert(OTHER_OBLAST, oblast=OTHER_OBLAST)).coverage is Coverage.NONE
+    assert alerts_in_ua(alert(OTHER_OBLAST, oblast="Львівська область")).coverage is Coverage.NONE
     assert alerts_in_ua().coverage is Coverage.NONE
 
 
 def test_alerts_in_ua_kind_map_and_times():
-    s = alerts_in_ua(alert(CITY, "artillery_shelling"), alert(OTHER_RAION, "new_type"))
+    s = alerts_in_ua(alert(CITY, "artillery_shelling"), alert(RAION, "new_type"))
     assert s.kinds == {"artillery", "other"}
+    nearby = alerts_in_ua(alert(CITY), alert(OTHER_RAION, "artillery_shelling"))
+    assert nearby.kinds == {"air_raid"}  # an alert elsewhere does not change the kinds
     assert s.observed_at == datetime(2026, 11, 8, 11, 5, tzinfo=UTC)
     assert s.changed_at == datetime(2026, 11, 8, 11, 0, tzinfo=UTC)
 
@@ -266,3 +269,19 @@ def test_old_alerts_in_ua_uids_win_over_the_region_ids(monkeypatch):
                                                       "region_id": "155", "district_id": "38", "oblast_id": "3"}})
     assert (source.variables["city_uid"], source.variables["raion_uid"], source.variables["oblast_uid"]) \
         == ("1", "2", "3")
+
+
+def test_alerts_in_ua_takes_its_own_time_form():
+    source = source_from(ROOT / "examples" / "sources" / "alerts_in_ua.toml",
+                         city_uid=CITY, raion_uid=RAION, oblast_uid=OBLAST)
+    status = source.parse({"alerts": [], "meta": {"last_updated_at": "2026/11/08 11:05:00 +0000"}})
+    assert status.observed_at == datetime(2026, 11, 8, 11, 5, tzinfo=UTC)
+
+
+def test_alerts_in_ua_without_oblast_name_still_starts(monkeypatch):
+    """An older config has no oblast_name: it starts, and an alert elsewhere in the oblast is not seen."""
+    monkeypatch.setenv("ALERTS_IN_UA_TOKEN", "t")
+    source = SOURCES.create("alerts_in_ua", {"vars": {"region_id": CITY, "district_id": RAION, "oblast_id": OBLAST}})
+    payload = {"meta": {"last_updated_at": "2026-11-08T11:05:00Z"}}
+    assert source.parse({**payload, "alerts": [alert(OTHER_RAION)]}).coverage is Coverage.NONE
+    assert source.parse({**payload, "alerts": [alert(OBLAST)]}).coverage is Coverage.FULL

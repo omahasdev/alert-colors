@@ -26,7 +26,7 @@ region_id = "0"               # Тестовий регіон
 district_id = "0"             # its district (an alert there covers the place)
 oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial"
                               # all ids: https://siren.pp.ua/api/v3/regions
-oblast_name = ""              # the oblast name, for sources that know only oblasts (ubilling)
+oblast_name = ""              # the oblast name: for ubilling, and for "partial" of alerts_in_ua
 
 # Network limits for the API (the app runs with admin rights). Defaults:
 # [source.request]

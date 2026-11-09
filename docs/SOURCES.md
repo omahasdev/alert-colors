@@ -134,6 +134,10 @@ free. Volunteers run the project. In the form, tell what the project does and
 how often it polls. For example: a non-commercial open-source program on one
 home PC, one request each 10 s.
 
+- **Place:** `region_id`, `district_id` and `oblast_id` for an alert on the
+  place. For the `partial` scene, it compares the oblast name of each alert
+  with `oblast_name`. In an older config without `oblast_name`, run
+  `setup.cmd region` again.
 - **How the app sends it:** the HTTP header `Authorization: Bearer <token>`.
 - **Environment variable:** `ALERTS_IN_UA_TOKEN`.
 - **Limit:** 8 to 10 requests per minute for each IP address, never more than

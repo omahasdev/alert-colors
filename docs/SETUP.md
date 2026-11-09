@@ -160,7 +160,7 @@ setup writes these values into `[source.vars]`:
 | `region_id` | The watched place | `0` |
 | `district_id` | Its district: an alert there covers the place | `0` |
 | `oblast_id` | Its oblast: an alert there covers the place, and an alert elsewhere in it gives the `partial` scene | `0` |
-| `oblast_name` | The name of its oblast, for sources that know only oblasts | `""` |
+| `oblast_name` | The name of its oblast: for `ubilling`, and for the `partial` scene of `alerts_in_ua` | `""` |
 
 The tree of the API has some cities at the top level, with no children:
 Kharkiv and Zaporizhzhia. The picker links them to their oblast and district

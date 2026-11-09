@@ -76,7 +76,7 @@ place one time for all sources:
 | `region_id` | The ID of the place (community, district or oblast). All IDs: https://siren.pp.ua/api/v3/regions | `siren_pp_ua`, `ukrainealarm`, `alerts_in_ua` |
 | `district_id` | The ID of its district | the same |
 | `oblast_id` | The ID of its oblast | the same |
-| `oblast_name` | The name of its oblast, for example `"Київська область"` | `ubilling` |
+| `oblast_name` | The name of its oblast, for example `"Київська область"` | `ubilling`, `alerts_in_ua` (for the `partial` scene) |
 
 Some presets use other names. Each one takes its value from a variable of the
 table, unless the config gives it:
