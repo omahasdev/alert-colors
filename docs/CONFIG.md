@@ -275,7 +275,7 @@ Without the `[tuning]` section, the app reads no tuning file.
 |---|---|---|
 | `[service] stop_event` | Required | The name of the Windows event that stops the app. `setup.cmd` and the `stop` command use it. Keep the single quotes |
 | `[logging] level` | Required | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
-| `[logging] file` | Required | The log file name. It is always in the folder of the config file: an absolute path or `..` is not allowed |
+| `[logging] file` | Required | The log file name. It is always in the folder of the config file: an absolute path or `..` is not allowed. An empty name (`""`) turns off the log file |
 | `[logging] max_bytes` | Required | At this size, the app starts a new log file |
 | `[logging] backups` | Required | The number of old log files to keep |
 

@@ -7,7 +7,7 @@ import pytest
 
 from alert_colors.domain import Coverage
 from alert_colors.sources import SOURCES
-from alert_colors.sources.json_http import FieldError
+from alert_colors.sources.json_http import FieldError, TimeParser
 
 ROOT = Path(__file__).resolve().parents[1]
 UBILLING = ROOT / "examples" / "sources" / "ubilling.toml"
@@ -80,7 +80,7 @@ def test_alerts_in_ua_kind_map_and_times():
     assert s.kinds == {"artillery", "other"}
     nearby = alerts_in_ua(alert(CITY), alert(OTHER_RAION, "artillery_shelling"))
     assert nearby.kinds == {"air_raid"}  # an alert elsewhere does not change the kinds
-    assert s.observed_at == datetime(2026, 11, 8, 11, 5, tzinfo=UTC)
+    assert s.observed_at is None  # meta.last_updated_at is the last change in the country
     assert s.changed_at == datetime(2026, 11, 8, 11, 0, tzinfo=UTC)
 
 
@@ -271,11 +271,9 @@ def test_old_alerts_in_ua_uids_win_over_the_region_ids(monkeypatch):
         == ("1", "2", "3")
 
 
-def test_alerts_in_ua_takes_its_own_time_form():
-    source = source_from(ROOT / "examples" / "sources" / "alerts_in_ua.toml",
-                         city_uid=CITY, raion_uid=RAION, oblast_uid=OBLAST)
-    status = source.parse({"alerts": [], "meta": {"last_updated_at": "2026/11/08 11:05:00 +0000"}})
-    assert status.observed_at == datetime(2026, 11, 8, 11, 5, tzinfo=UTC)
+def test_iso_takes_the_time_form_of_alerts_in_ua():
+    parser = TimeParser("iso", ZoneInfo("UTC"))
+    assert parser.parse("2026/11/08 11:05:00 +0000") == datetime(2026, 11, 8, 11, 5, tzinfo=UTC)
 
 
 def test_alerts_in_ua_without_oblast_name_still_starts(monkeypatch):

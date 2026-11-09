@@ -25,9 +25,16 @@ an artillery alert in another hromada does not change the scene. The oblast of a
 `location_oblast` (the name), compared with `oblast_name`. The field
 `location_oblast_uid` is not the UID of the oblast: for a hromada or a raion it
 is the UID of that place. If `oblast_name` is empty (an older config), the app
-does not see an alert elsewhere in the oblast: run `setup.cmd region` again. Tested live: `location_uid` is a
-string, `location_oblast_uid` is a number, and `meta.last_updated_at` has the
-form "2026/11/08 11:05:00 +0000".
+does not see an alert elsewhere in the oblast: run `setup.cmd region` again.
+
+The preset gives no `observed_at`. The field `meta.last_updated_at` is the time
+of the last alert change in the whole country, not the time of the answer: in a
+quiet period of more than `stale_after_s`, the correct status counted as stale,
+and the LEDs showed "unknown" for a moment. Without `observed_at`, the daemon
+uses the time of the successful fetch, as for siren_pp_ua and ukrainealarm.
+
+Tested live: `location_uid` is a string, `location_oblast_uid` is a number, and
+`meta.last_updated_at` has the form "2026/11/08 11:05:00 +0000".
 """
 
 from __future__ import annotations
@@ -51,7 +58,6 @@ DEFAULTS = {
         "full": f"length(alerts[?{_IN_PLACE}]) > `0`",
         "partial": f"length(alerts[?{_IN_OBLAST}]) > `0`",
         "kinds": f"alerts[?{_IN_PLACE}].alert_type",
-        "observed_at": "meta.last_updated_at",
         "changed_at": f"alerts[?{_IN_PLACE}].started_at",
     },
     "kinds": {

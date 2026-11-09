@@ -242,6 +242,6 @@ stop_event = 'Local\AlertColors.Stop'   # TOML literal string: the backslash sta
 # =============================================================== logging ====
 [logging]
 level = "INFO"
-file = "alert-colors.log"     # relative to this file's folder
+file = "alert-colors.log"     # relative to this file's folder; "" turns off the log file
 max_bytes = 1048576
 backups = 3
