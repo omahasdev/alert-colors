@@ -18,13 +18,15 @@ The app is a small engine with exchangeable parts:
 The shipped configuration shows air-raid alerts in Ukraine. It polls a public
 alert API once a second, with no API key:
 
-| State | When | Look |
+| Scene | When | LED colors |
 |---|---|---|
-| N | No active alert | Dim steady green |
-| R | An alert on the watched place, its district or its oblast | Red breathing |
-| Y | A preliminary threat on the watched place | Yellow breathing |
-| P | No alert on the place, but an alert elsewhere in the oblast | Steady orange |
-| unknown | No data, or old data | Slow purple breathing |
+| `clear` | No active alert | Dim steady green |
+| `alert` | An alert on the watched place, its district or its oblast | Red breathing |
+| `threat` | A preliminary threat on the watched place | Yellow breathing |
+| `partial` | No alert on the place, but an alert elsewhere in the oblast | Steady orange |
+| `unknown` | No data, or data older than `stale_after_s` | Slow purple breathing |
+
+The scene names are the `[scenes.*]` sections of `config.toml`.
 
 The watched place in the repository is the test region of the API. The setup
 asks you for your city, community, district or oblast.
@@ -40,22 +42,22 @@ tells [which modules your PC needs](docs/SETUP.md#2-choose-the-modules).
 
 **Lighting: shows the status on the hardware**
 
-| Module | What it is for | It needs |
+| Module | What it is for | Requirements |
 |---|---|---|
-| `aura_sdk` | ASUS Aura devices: motherboard, ASUS graphics card, ARGB headers (LED strips, fans) | Armoury Crate with Aura Sync; the app runs with admin rights |
+| `aura_sdk` | ASUS Aura devices: motherboard, ASUS graphics card, ARGB headers (LED strips, fans) | Armoury Crate with Aura Sync. The app then runs with admin rights |
 | `razer_chroma` | Razer Chroma devices: keyboards (per column), mice | Razer Synapse, with Chroma apps allowed |
-| `console` (core) | No hardware: writes each scene change to the log | Nothing |
+| `console` (always in the build) | No hardware: writes each scene change to the log | Nothing |
 
 **Sources: read the status from an API**
 
-| Module | What it is for | Key |
+| Module | What it is for | API key required |
 |---|---|---|
-| `siren_pp_ua` (default) | Ukrainian air-raid alerts, community level, from a public mirror of the official API. The fastest source without a key | No |
+| `siren_pp_ua` (default) | Ukrainian air-raid alerts, community (hromada) level, from a public mirror of the official API. The fastest source without an API key | No |
 | `ukrainealarm` | The same data from the official ukrainealarm.com API | Yes |
-| `alerts_in_ua` | Alerts from alerts.in.ua, community level | Yes |
+| `alerts_in_ua` | Alerts from alerts.in.ua, community (hromada) level | Yes (a token) |
 | `ubilling` | Alerts from ubilling.net.ua, oblast level only. A fallback | No |
-| `alerts_com_ua` | Alerts from alerts.com.ua, oblast level only. Its data was frozen on 2026-11-08 | No |
-| `json_http` (core) | Any other JSON API, configured in `config.toml`. Each source above is a preset of it | Optional |
+| `alerts_com_ua` | Alerts from alerts.com.ua, oblast level only. The service stopped updating its data (checked 2026-11-08) | No |
+| `json_http` (always in the build) | Any other JSON API, configured in `config.toml`. Each source above is a preset of it | Only if that API needs one |
 
 ## Minimal setup
 
@@ -81,14 +83,14 @@ Then, if you use ASUS devices, do this one time in Armoury Crate:
 2. Open the in-game lighting priority list, then move **AlertColors.exe** to the top.
 
 Caution: Make sure that **AlertColors.exe** stays at the top of the priority
-list. If an other app is above it, Armoury Crate gives the LEDs to that app,
+list. If another app is above it, Armoury Crate gives the LEDs to that app,
 and the PC LEDs do not show the alert status.
 
 Note: After the install, and after each start of the app, the PC LEDs (ASUS
 Aura) can need approximately 30 s before they change. The ASUS SDK first scans
 all devices. The Razer devices change at once.
 
-If your PC has only one lighting system, give it to the install:
+If your PC has only one lighting system, name its module in the install command:
 `setup.cmd install -Lighting razer_chroma` or `setup.cmd install -Lighting aura_sdk`.
 Without git, download the ZIP of the repository and extract it to the same folder.
 
@@ -100,12 +102,12 @@ To uninstall, run this command, then accept the UAC prompt:
 
 It stops the app (the LEDs go back to their vendor apps), then removes the
 autostart, the Armoury Crate entry and the installed files. Then delete the
-folders `%USERPROFILE%\alert-colors` and `%APPDATA%\AlertColors` (the config of
-your PC). The full guide lists [all items that stay](docs/SETUP.md#maintain-update-restart-uninstall).
+folders `%USERPROFILE%\alert-colors` and `%APPDATA%\AlertColors` (your own
+config, with the watched place). The full guide lists [all items that stay](docs/SETUP.md#maintain-update-restart-uninstall).
 
 **Full setup guide:** [docs/SETUP.md](docs/SETUP.md). It has the requirements,
 a step-by-step clean install, the modules for your PC, all `setup.cmd`
-actions, the config of your PC, every configuration key, the security model
+actions, your own config file, every setting in `config.toml`, the security model
 and troubleshooting.
 
 **Command reference:** [docs/COMMANDS.md](docs/COMMANDS.md). It lists every
@@ -178,16 +180,16 @@ flowchart TB
 
 Blue boxes are the exchangeable modules: sources and lighting. Gray boxes are the engine. Dashed boxes are outside the app.
 
-| Module | Main type | What it does |
+| Module | Primary class | What it does |
 |---|---|---|
 | `sources/` | `AlertSource` | `fetch()` gives an `AlertStatus` |
 | `sources/json_http.py` | (core) | Any JSON API from the config, with JMESPath fields |
-| `sources/siren_pp_ua.py`, `ukrainealarm.py`, `ubilling.py`, `alerts_in_ua.py`, `alerts_com_ua.py` | presets | Optional named defaults for known APIs |
+| `sources/siren_pp_ua.py`, `ukrainealarm.py`, `ubilling.py`, `alerts_in_ua.py`, `alerts_com_ua.py` | (presets, no class) | Optional named defaults for known APIs |
 | `policy.py` | `Policy` | Ordered rules: `AlertStatus` to a scene name |
 | `scenes.py` | `Scene` | An effect, or a release: each backend gives its LEDs back to its vendor app |
 | `effects.py` | `Effect` | `colors(t, n)`: one color for each LED, with a parameter schema |
 | `frame.py` | `Frame` | An effect at one moment, with brightness and color correction |
-| `lighting/` | `LightingBackend` | `show(frame)`, `release()`: `console` (core), `aura_sdk`, `razer_chroma` |
+| `lighting/` | `LightingBackend` | `show(frame)`, `release()`: `console` (always in the build), `aura_sdk`, `razer_chroma` |
 | `outputs.py` | `BackendWorker` | One thread for each backend, newest frame wins, retry |
 | `daemon.py` | `Daemon` | Poller thread with backoff, and the render loop |
 | `tuning.py`, `tuner.py` | `TuningWatcher`, `Tuner` | The live tuning file and the configurator page |

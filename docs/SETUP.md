@@ -46,22 +46,22 @@ remove it as the table at the end of this section shows.
 
 **Lighting modules: they show the status on the hardware**
 
-| Module | What it is for | It needs | Admin rights |
+| Module | What it is for | Requirements | Admin rights |
 |---|---|---|---|
 | `aura_sdk` | ASUS Aura devices: motherboard LEDs, ASUS graphics card, ARGB headers (LED strips, fans), and other Aura Sync devices | Armoury Crate with Aura Sync | Yes: the app then runs elevated |
 | `razer_chroma` | Razer Chroma devices: keyboards (one color for each of 22 columns), mice, and other Chroma devices | Razer Synapse, with Chroma apps allowed | No |
-| `console` (core, always present) | No hardware: writes each scene change to the log. For tests, and for a build without lighting modules | Nothing | No |
+| `console` (always in the build) | No hardware: writes each scene change to the log. For tests, and for a build without lighting modules | Nothing | No |
 
 **Source modules: they read the status from an API**
 
-| Module | What it is for | Key | Level |
+| Module | What it is for | API key required | Smallest area |
 |---|---|---|---|
-| `siren_pp_ua` (default) | Ukrainian air-raid alerts from https://siren.pp.ua, a public mirror of the official ukrainealarm.com API. The fastest source without a key: 1 to 3 s from a change to the LEDs | No | Community (hromada), with alert types |
-| `ukrainealarm` | The same data from the official API https://api.ukrainealarm.com. Use it if you have an official key (`UKRAINEALARM_API_KEY`) | Yes | Community, with alert types |
-| `alerts_in_ua` | Alerts from https://api.alerts.in.ua. Use it if you have a token from that service | Yes | Community, with alert types |
-| `ubilling` | Alerts from https://ubilling.net.ua/aerialalerts/. A fallback without a key | No | Oblast only |
-| `alerts_com_ua` | Alerts from https://alerts.com.ua. Its data was frozen on 2026-11-08: do not use it until the service works again | No | Oblast only |
-| `json_http` (core, always present) | Any other JSON API: you write the request and the fields in the config (`examples\sources\custom_json_http.toml`). Each source above is a preset of this module | Optional | Any |
+| `siren_pp_ua` (default) | Ukrainian air-raid alerts from https://siren.pp.ua, a public mirror of the official ukrainealarm.com API. The fastest source without an API key: 1 to 3 s from a change to the LEDs | No | Community (hromada), with alert types |
+| `ukrainealarm` | The same data from the official API https://api.ukrainealarm.com. Use it if you have an official API key (`UKRAINEALARM_API_KEY`) | Yes | Community, with alert types |
+| `alerts_in_ua` | Alerts from https://api.alerts.in.ua. Use it if you have a token from that service | Yes (a token) | Community, with alert types |
+| `ubilling` | Alerts from https://ubilling.net.ua/aerialalerts/. A fallback without an API key | No | Oblast only |
+| `alerts_com_ua` | Alerts from https://alerts.com.ua. The service stopped updating its data (checked 2026-11-08): do not use it until it works again | No | Oblast only |
+| `json_http` (always in the build) | Any other JSON API: you write the request and the fields in the config (`examples\sources\custom_json_http.toml`). Each source above is a preset of this module | Only if that API needs one | Any |
 
 **The modules for your PC**
 
@@ -245,7 +245,7 @@ overrides a value of the preset. `examples\sources\` has a complete block for
 each source. For any other JSON API, use `type = "json_http"`
 (`examples\sources\custom_json_http.toml`):
 
-| Key | Meaning |
+| Setting | Meaning |
 |---|---|
 | `poll_interval_s` | Wait after each successful fetch |
 | `backoff_max_s` | After errors (for example HTTP 429), the wait doubles up to this value. The server's `Retry-After` is obeyed. |
