@@ -319,9 +319,12 @@ effect spans the real strip.
 **Taking the LEDs again.** A vendor app can take the LEDs back without a
 message to the app. The ASUS service does it each time the display turns on.
 The app listens for "display on" and "resume from sleep", then takes the LEDs
-again every `reclaim_step_s` (5 s) for `reclaim_after_wake_s` (60 s). It also
-takes them again every `reclaim_interval_s` (300 s) at any time, for other
-causes. All three keys are in `[display]`.
+again every `reclaim_step_s` (5 s) for `reclaim_after_wake_s` (60 s). A vendor
+app also takes the LEDs back when it starts. The app reads the process list every
+`vendor_poll_s` (2 s). A new process with a name in `vendor_processes`
+(Armoury Crate, the ASUS lighting service) starts the same window. It also takes
+the LEDs again every `reclaim_interval_s` (300 s) at any time, for other causes.
+All these keys are in `[display]`. The log has one line for each window.
 
 **Brightness.** `[display] brightness` scales every color. `brightness` in a
 `[[lighting]]` entry scales one backend.
@@ -433,6 +436,10 @@ APIs. They explain the values of some settings.
   the event, and applied its own profile to the devices 12 s after the event.
   The SDK in the app gets no error: its colors only stop showing. "Display off"
   does not take the token.
+- At logon, `ArmouryCrate.exe` can start more than 60 s after the app, when
+  the startup window has ended. Armoury Crate then loads its own profile, and
+  the LEDs show it until the next interval reclaim. Thus the app also watches
+  vendor process starts.
 - One `SwitchMode()` adds approximately 14 lines (1.5 KB) to `AuraSDK.log`,
   which the ASUS service does not rotate, and approximately 43 lines to
   `LightingService.log`, which it rotates. So `reclaim_interval_s` is 300 s, not less.

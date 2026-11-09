@@ -61,6 +61,7 @@ class Daemon:
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _reclaim_until: float = field(default=0.0, init=False)  # monotonic; set by request_reclaim()
     _last_reclaim: float | None = field(default=None, init=False)
+    _window_logged: bool = field(default=False, init=False)  # the first reclaim of a window is logged
     _scene: str | None = field(default=None, init=False)
     _scene_started: float = field(default=0.0, init=False)
     _released: bool = field(default=True, init=False)
@@ -144,8 +145,8 @@ class Daemon:
             output.show(frame)
         self._reclaim_if_due(now)
 
-    def request_reclaim(self) -> None:
-        """A wake event (any thread): take the LEDs again for a while.
+    def request_reclaim(self, reason: str = "display on or resume") -> None:
+        """A wake event or a vendor app start (any thread): take the LEDs again for a while.
 
         The ASUS service took its token 0.2 s after the event, but applied its
         profile to the devices 12 s later. So one reclaim is not enough: the
@@ -153,7 +154,8 @@ class Daemon:
         """
         with self._lock:
             self._reclaim_until = self.monotonic() + self.settings.reclaim_after_wake_s
-        log.info("display on or resume: taking the LEDs again for %ss", self.settings.reclaim_after_wake_s)
+            self._window_logged = False
+        log.info("%s: taking the LEDs again for %ss", reason, self.settings.reclaim_after_wake_s)
 
     def _reclaim_if_due(self, now: float) -> None:
         if self._last_reclaim is None:
@@ -163,8 +165,14 @@ class Daemon:
         with self._lock:
             after_wake = now < self._reclaim_until
         interval = self.settings.reclaim_interval_s
-        if (after_wake and since >= self.settings.reclaim_step_s) or (interval and since >= interval):
+        by_interval = bool(interval) and since >= interval
+        if (after_wake and since >= self.settings.reclaim_step_s) or by_interval:
             self._last_reclaim = now
+            if by_interval:
+                log.info("taking the LEDs again (interval)")
+            elif not self._window_logged:  # one line for each window: the log stays short
+                log.info("taking the LEDs again (after an event, every %ss)", self.settings.reclaim_step_s)
+                self._window_logged = True
             for output in self.outputs:
                 output.reclaim()
 

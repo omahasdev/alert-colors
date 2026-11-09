@@ -1,9 +1,8 @@
 """Windows power events: the display turns on, or the PC resumes from sleep.
 
 Why: the ASUS lighting service takes the LEDs back when the display turns on.
-Measured on 2026-11-09: at 09:34:13.8 the service got WM_POWERBROADCAST
-(PBT_POWERSETTINGCHANGE), and at 09:34:14.0 it took the Aura token and loaded
-its own profile. The app gets no message about this, so it listens to the same
+The service gets WM_POWERBROADCAST (PBT_POWERSETTINGCHANGE), and 0.2 s later
+it takes the Aura token and loads its own profile. The app gets no message about this, so it listens to the same
 events and takes the LEDs again (Daemon.request_reclaim).
 
 A hidden top-level window gets the events. A message-only window would miss

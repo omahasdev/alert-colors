@@ -162,6 +162,11 @@ backend_close_timeout_s = 90  # on exit, wait this long for each backend to rele
 reclaim_after_wake_s = 60     # after the display turns on or the PC resumes, for this long ...
 reclaim_step_s = 5            # ... take the LEDs again this often
 reclaim_interval_s = 300      # and also this often at any time; 0 = never by time
+# A vendor app also takes the LEDs back when it starts: at logon, Armoury Crate
+# can start more than 60 s after the app. A new process with one of these names starts
+# the same reclaim window as "display on". [] = do not watch.
+vendor_processes = ["ArmouryCrate.exe", "LightingService.exe", "AacAmbientLighting.exe"]
+vendor_poll_s = 2             # read the process list this often
 
 # ============================================================== lighting ====
 # Each [[lighting]] entry is one backend. `type` selects a registered backend.

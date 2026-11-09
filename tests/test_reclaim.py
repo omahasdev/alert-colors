@@ -197,3 +197,12 @@ def test_the_window_gets_a_resume_broadcast():
     win32gui.SendMessage(watcher.hwnd, power_events.WM_POWERBROADCAST, power_events.PBT_APMRESUMEAUTOMATIC, 0)
     assert woke.wait(WAIT_S)
     watcher.stop()
+
+
+def test_one_log_line_for_each_window(caplog):
+    daemon, clock = make_daemon()
+    reclaims_at(daemon, clock, [0, 10])
+    daemon.request_reclaim()
+    with caplog.at_level("INFO", logger="alert_colors.daemon"):
+        reclaims_at(daemon, clock, [10 + STEP_S * i for i in range(1, 4)])
+    assert caplog.text.count("taking the LEDs again (after an event") == 1

@@ -25,6 +25,9 @@ DEFAULT_CONFIG = Path("config.toml")
 DEFAULT_RECLAIM_INTERVAL_S = 300.0  # a fallback for takeovers without a wake event
 DEFAULT_RECLAIM_AFTER_WAKE_S = 60.0  # the ASUS service applied its profile 12 s after the event
 DEFAULT_RECLAIM_STEP_S = 5.0
+# A new process with one of these names takes the LEDs back (see process_events.py).
+DEFAULT_VENDOR_PROCESSES = ("ArmouryCrate.exe", "LightingService.exe", "AacAmbientLighting.exe")
+DEFAULT_VENDOR_POLL_S = 2.0
 log = logging.getLogger(__name__)
 
 
@@ -120,6 +123,12 @@ class App:
             settings=self.settings(),
             tuning=self.tuning_watcher(outputs),
         )
+
+    def vendor_watch(self) -> tuple[list[str], float]:
+        """The vendor process names to watch, and how often to read the process list."""
+        display = self.raw["display"]
+        names = [str(name) for name in display.get("vendor_processes", DEFAULT_VENDOR_PROCESSES)]
+        return names, float(display.get("vendor_poll_s", DEFAULT_VENDOR_POLL_S))
 
     def stop_event_name(self) -> str:
         return self.raw["service"]["stop_event"]

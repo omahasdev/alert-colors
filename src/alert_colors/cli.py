@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import power_events, stop_signal
+from . import power_events, process_events, stop_signal
 from .http import RateLimitedError
 from .config import DEFAULT_CONFIG, App
 from .frame import Frame
@@ -68,9 +68,13 @@ def _run(app: App, args: argparse.Namespace) -> int:
     handle = stop_signal.watch(app.stop_event_name(), stop)  # noqa: F841  keep alive
     daemon = app.daemon(dry_run=args.dry_run)
     stop_power_events = power_events.watch(daemon.request_reclaim)
+    names, poll_s = app.vendor_watch()
+    stop_process_events = process_events.watch(
+        names, poll_s, lambda name: daemon.request_reclaim(f"{name} started"))
     try:
         daemon.run(stop)
     finally:
+        stop_process_events()
         stop_power_events()
     return 0
 
