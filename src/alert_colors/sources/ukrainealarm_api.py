@@ -4,9 +4,9 @@ Not an optional module: `ukrainealarm` and `siren_pp_ua` both use it, and a
 build can include either one alone.
 
 Variables in [source.vars]:
-    region_id    the watched place, for example "332" (м. Дніпро та Дніпровська ТГ)
-    district_id  its district, for example "44"
-    oblast_id    its oblast, for example "9"
+    region_id    the watched place, for example "0" (Тестовий регіон, the test region)
+    district_id  its district ("0" for the test region)
+    oblast_id    its oblast ("0" for the test region)
 All ids: GET {base}/regions (oblast > district > community).
 
 States (checked live on 2026-11-08 through siren.pp.ua):

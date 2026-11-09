@@ -4,6 +4,7 @@ All commands of alert-colors: the two double-click scripts, the actions of
 `setup.cmd`, and the command line of `AlertColors.exe`. The
 [full setup guide](SETUP.md) tells when to use them, and the
 [configuration reference](CONFIG.md) lists every setting.
+The [sources guide](SOURCES.md) tells how to get a token and save it.
 
 ## Double-click scripts
 
@@ -28,9 +29,11 @@ argument to run it without the menu: `setup.cmd status`.
 | 5 | `uninstall` | Stop, remove the task, the Armoury Crate entry, the installed files and the tuning folder | To remove the app |
 | 6 | `build` | Make `.venv`, run the tests, build `dist\AlertColors` | For development |
 | 7 | `tune` | Open the configurator (the same as `configure.cmd`) | To tune colors and effects |
-| 8 | `region` | Search the place, save it in the config of your PC, then restart the installed app | To watch a different place |
+| 8 | `region` | Search the place, save it in the config of your PC (all place IDs for all sources), then restart the installed app | To watch a different place |
+| 9 | `token` | Save, test or remove the token of an alert service, then restart the installed app. No config change | After you get a token |
 
-`install`, `update`, `restart` and `uninstall` need admin rights. The build
+`install`, `update`, `restart` and `uninstall` need admin rights. `region` and
+`token` need none, but their restart of the installed app does. The build
 always runs with your normal rights. Then only the admin part continues in an
 elevated window.
 
@@ -66,12 +69,13 @@ Without `--config`, the exe reads `config.toml` in the current folder.
 |---|---|---|
 | `run [--dry-run]` | Watch the alerts and drive the LEDs. The logon task runs this command. `--dry-run` logs the colors and does not use the hardware | 0 after a stop |
 | `stop` | Ask the running app to release the LEDs and exit. Use this command, never a kill | 0: stop sent. 1: no app runs |
-| `check` | Load the config, build all parts, fetch each source one time: `[source]`, then each fallback of `[failover]`. A config error in any source fails the check. A server that does not answer fails it only when no source gives a status | 0: OK. 1: an error |
-| `status` | Fetch the alert status one time, then print it and the scene. With fallback sources, it does this for each source | 0: fetched. Not 0: the fetch failed (with fallbacks: all sources failed) |
+| `check` | Load the config, build all parts, fetch each source one time, in the order of use. A source without a saved token, or without its place variable, is listed as not used. A config error or a refused token (HTTP 401, 403) in any source fails the check. A server that does not answer fails it only when no source gives a status | 0: OK. 1: an error |
+| `status` | Fetch the alert status one time, then print it and the scene. With more than one source, it does this for each source, in the order of use, and lists the sources that are not used | 0: fetched. Not 0: the fetch failed (with fallbacks: all sources failed) |
 | `devices` | List the devices of each enabled lighting backend. `[x]` marks the devices that the config includes | 0 |
 | `preview <scene> --seconds <n>` | Show one scene on the hardware for `n` seconds, then release the LEDs | 0. 1: the scene only releases the LEDs |
 | `tune [--no-browser]` | Start the configurator on `127.0.0.1` and open it in the browser. `--no-browser` prints the URL only | 0 |
-| `region [--id <id>]` | Search the watched place by name and write it into the `--config` file. `--id` sets the region ID without questions | 0: saved. 1: no place has this ID. 3: no change |
+| `region [--id <id>]` | Search the watched place by name and write its IDs and its oblast name into the `--config` file. The same place is written again when the config misses a variable of a newer version. `--id` sets the region ID without questions | 0: saved. 1: no place has this ID. 3: no change |
+| `token` | List the services with a token, then save, test or remove one token in the user environment. A token that the server refuses is not saved | 0: saved or removed. 1: refused. 3: no change |
 
 The scenes for `preview` are the `[scenes.*]` names in the config: `clear`,
 `unknown`, `alert`, `partial`, `threat`, `artillery`, `urban_fights`,

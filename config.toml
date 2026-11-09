@@ -20,13 +20,13 @@ stale_after_s = 180           # older data shows the "unknown" scene, never "cle
 
 # The watched place. The default is the test region of the API: choose your
 # place with setup.cmd (8). The choice goes to %APPDATA%\AlertColors\config.toml,
-# not into this file. Example: region_id "332", district_id "44", oblast_id "9"
-# is м. Дніпро та Дніпровська територіальна громада.
+# not into this file.
 [source.vars]                 # values for ${name} placeholders of the preset
 region_id = "0"               # Тестовий регіон
 district_id = "0"             # its district (an alert there covers the place)
 oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial"
                               # all ids: https://siren.pp.ua/api/v3/regions
+oblast_name = ""              # the oblast name, for sources that know only oblasts (ubilling)
 
 # Network limits for the API (the app runs with admin rights). Defaults:
 # [source.request]
@@ -35,30 +35,38 @@ oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial
 # max_response_bytes = 1048576  # larger responses are refused
 
 # ============================================================== failover ====
-# Fallback sources: the app reads them when [source] has no data, for example
-# when its server is down. Without [[failover.sources]], the app reads only
-# [source]. Each entry takes the keys of [source]; it gets the [source.vars]
-# of [source], and its own [failover.sources.vars] replace single values.
-# The rules (see src/alert_colors/sources/failover.py):
-# - [source] is always the first choice; HTTP 429 never switches.
-# - A fallback is used when [source] had no success for after_s.
+# The app reads its sources in this order (see docs/SOURCES.md):
+#   1. the services of [[failover.token_sources]] whose token is saved
+#      (setup.cmd token), in their order
+#   2. [source]
+#   3. [[failover.sources]], in their order
+# Every source gets the [source.vars] of [source]: setup.cmd region writes the
+# place one time for all sources. The rules (src/alert_colors/sources/failover.py):
+# - The first source is the first choice; HTTP 429 never switches.
+# - The next source is used when the first one had no success for after_s,
+#   or at once when its server refused the token.
 # - After a failure, a source is skipped for retry_s, doubled each time up to
-#   retry_max_s. So the app tries [source] again, and goes back to it when it works.
+#   retry_max_s. So the app tries the first source again, and goes back to it.
 [failover]
 after_s = 30                  # must be less than stale_after_s, or the LEDs show "unknown" first
 retry_s = 10                  # less than after_s: one timeout of [source] does not switch
 retry_max_s = 120
 
+# Services with a token, best first. Without this list, the app uses this
+# default. A service without a saved token is not used, and that is no error.
+# [[failover.token_sources]]
+# type = "ukrainealarm"       # official API: the same data as siren_pp_ua
+# poll_interval_s = 1
+# [[failover.token_sources]]
+# type = "alerts_in_ua"       # its limit: 8 to 10 requests per minute
+# poll_interval_s = 10
+
 # ubilling: no key, but oblast level only. While it is in use, an alert
-# anywhere in the oblast shows the "alert" scene (red), never "partial".
-# Set `region` to the oblast name as the feed spells it
-# (https://ubilling.net.ua/aerialalerts/). After you choose a place in another
-# oblast, change it here too: `setup.cmd` checks it before each install.
-# [[failover.sources]]
-# type = "ubilling"
-# poll_interval_s = 10        # fetch this fallback at most this often
-# [failover.sources.vars]
-# region = "Київська область"
+# anywhere in the oblast shows the "alert" scene (red), never "partial". It
+# takes the oblast from oblast_name, and it is not used while that is empty.
+[[failover.sources]]
+type = "ubilling"
+poll_interval_s = 10          # fetch this source at most this often
 
 # ================================================================= rules ====
 # Status -> scene. The first rule that matches wins, so the order is the priority.

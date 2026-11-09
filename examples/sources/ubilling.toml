@@ -1,4 +1,5 @@
-# ubilling: no token, oblast level. This is the default in config.toml.
+# ubilling: no token, oblast level only. config.toml uses it as the last backup
+# ([[failover.sources]]). Use this block only to make it [source].
 [source]
 type = "ubilling"
 poll_interval_s = 1
@@ -6,4 +7,4 @@ backoff_max_s = 60
 stale_after_s = 180
 
 [source.vars]
-region = "Дніпропетровська область"   # the oblast name as the feed spells it
+oblast_name = "Київська область"   # setup.cmd region writes it

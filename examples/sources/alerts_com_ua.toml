@@ -7,4 +7,4 @@ backoff_max_s = 300
 stale_after_s = 180
 
 [source.vars]
-state_id = "3"                # 3 = Dnipropetrovsk oblast in this API
+state_id = "0"                # the oblast id of this API: GET https://alerts.com.ua/api/states lists them

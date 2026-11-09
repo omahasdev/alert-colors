@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .daemon import Daemon, DaemonSettings
+from . import user_env
 from .domain import FULL_BRIGHTNESS
 from .lighting import AVAILABLE_MODULES, BACKENDS, LightingBackend
 from .outputs import NO_CORRECTION, BackendWorker
@@ -20,6 +21,7 @@ from .scenes import Scene, build_scenes
 from .tuning import TuningWatcher, resolve_path
 from .sources import SOURCES, AlertSource
 from .sources.failover import FailoverSource, Member
+from .sources.preset import TOKENS, NotConfiguredError
 
 DEFAULT_CONFIG = Path("config.toml")
 # Take the LEDs again (see power_events.py): for a config without these keys.
@@ -34,6 +36,12 @@ DEFAULT_FAILOVER_AFTER_S = 30.0  # well below stale_after_s: the LEDs never show
 DEFAULT_FAILOVER_RETRY_S = 10.0  # below after_s: one timeout of the primary does not switch
 DEFAULT_FAILOVER_RETRY_MAX_S = 120.0
 DEFAULT_FALLBACK_POLL_S = 10.0
+# Without [[failover.token_sources]]: the city-level services that need a token,
+# best first. Each one is used only after `setup.cmd token` saves its token.
+DEFAULT_TOKEN_SOURCES = (
+    {"type": "ukrainealarm", "poll_interval_s": 1.0},  # official; polls only a change marker
+    {"type": "alerts_in_ua", "poll_interval_s": 10.0},  # its limit: 8 to 10 requests per minute
+)
 log = logging.getLogger(__name__)
 
 
@@ -52,40 +60,117 @@ class App:
         section = self.raw["source"]
         return SOURCES.create(section["type"], section)
 
-    def fallback_entries(self) -> list[dict[str, Any]]:
-        """The [[failover.sources]] entries whose module is in this build.
+    def _shared_entries(self, key: str, what: str) -> list[dict[str, Any]]:
+        """The enabled [[failover.<key>]] entries whose module is in this build.
 
         Each entry gets the [source.vars] of the primary source, and its own
-        `vars` replace single values. Thus a fallback with the same region IDs
-        needs no `vars`.
+        `vars` replace single values. Thus an entry for the same place needs
+        no `vars`: `setup.cmd region` writes the place one time for all sources.
         """
         shared_vars = self.raw["source"].get("vars", {})
         entries = []
-        for entry in self.raw.get("failover", {}).get("sources", []):
+        defaults = DEFAULT_TOKEN_SOURCES if key == "token_sources" else ()
+        given = key in self.raw.get("failover", {})
+        for entry in self.raw.get("failover", {}).get(key, [dict(e) for e in defaults]):
             if not entry.get("enabled", True):
                 continue
             if entry["type"] not in SOURCES.names():
-                log.warning("fallback source %r is not in this build (sources: %s); skipped",
-                            entry["type"], ", ".join(SOURCES.names()))
+                if not given:
+                    continue  # a default entry: a build without that module is normal
+                log.warning("%s %r is not in this build (sources: %s); skipped",
+                            what, entry["type"], ", ".join(SOURCES.names()))
                 continue
             entries.append({**entry, "vars": {**shared_vars, **entry.get("vars", {})}})
         return entries
 
+    def fallback_entries(self) -> list[dict[str, Any]]:
+        """[[failover.sources]]: used after [source], in this order."""
+        return self._shared_entries("sources", "fallback source")
+
     def fallback_sources(self) -> list[AlertSource]:
         return [SOURCES.create(entry["type"], entry) for entry in self.fallback_entries()]
 
+    def token_entries(self) -> tuple[list[dict[str, Any]], list[str]]:
+        """[[failover.token_sources]] whose token is saved, and the names of those without one.
+
+        These sources are used before [source]: with a token, they give the
+        same or better data. Without a token, an entry is not used, and that is
+        no error: `setup.cmd token` saves a token.
+        """
+        primary_type = self.raw["source"]["type"]
+        with_token, without = [], []
+        for entry in self._shared_entries("token_sources", "token source"):
+            if entry["type"] == primary_type:
+                continue  # it is [source] already
+            token = TOKENS.get(entry["type"])
+            if token is not None and user_env.get(token.variable) is None:
+                without.append(entry["type"])
+                continue
+            with_token.append(entry)
+        return with_token, without
+
+    def source_chain(self) -> list[tuple[dict[str, Any], float]]:
+        """Every source in the order of use, with its poll interval.
+
+        Token sources with a token, then [source], then [[failover.sources]].
+        [source] is fetched at each poll of the daemon (its interval: 0).
+        """
+        def interval(entry: dict[str, Any]) -> float:
+            return float(entry.get("poll_interval_s", DEFAULT_FALLBACK_POLL_S))
+
+        with_token, _without = self.token_entries()
+        chain = [(entry, interval(entry)) for entry in with_token]
+        chain.append((self.raw["source"], 0.0))
+        chain += [(entry, interval(entry)) for entry in self.fallback_entries()]
+        return chain
+
+    def check_sources(self) -> list[tuple[str, AlertSource | None, str]]:
+        """For `check` and `status`: (name, source or None, why it is not used).
+
+        The same order as the daemon. An entry without a token or without its
+        place variable is listed with the reason. Any other error is raised:
+        the check must stop a config with that error.
+        """
+        _with_token, without = self.token_entries()
+        result: list[tuple[str, AlertSource | None, str]] = [
+            (name, None, "no token saved (setup.cmd token)") for name in without]
+        for entry, _poll in self.source_chain():
+            if entry is self.raw["source"]:
+                result.append((entry["type"], self.source(), ""))
+                continue
+            try:
+                result.append((entry["type"], SOURCES.create(entry["type"], entry), ""))
+            except NotConfiguredError as error:
+                result.append((entry["type"], None, str(error)))
+        return result
+
     def alert_source(self) -> AlertSource:
-        """The source of the daemon: the primary, with the fallbacks of [failover] if any."""
-        primary = self.source()
-        entries = self.fallback_entries()
-        if not entries:
-            return primary  # no [failover]: the same as before
-        failover = self.raw["failover"]
+        """The source of the daemon: [source] alone, or the chain of [failover].
+
+        A source of the chain that cannot start (a place variable or a token is
+        missing) is skipped, so that one bad entry never stops the others.
+        `check` reports it. Only an error in [source] itself stops the app.
+        """
+        members = []
+        for entry, poll_interval_s in self.source_chain():
+            if entry is self.raw["source"]:
+                members.append(Member(self.source()))
+                continue
+            try:
+                source = SOURCES.create(entry["type"], entry)
+            except NotConfiguredError as error:
+                log.info("source %r not used: %s", entry["type"], error)
+                continue
+            except Exception as error:  # noqa: BLE001  a bad entry must not stop the others
+                log.error("source %r skipped: %s", entry["type"], error)
+                continue
+            members.append(Member(source, poll_interval_s=poll_interval_s))
+        if len(members) == 1:
+            return members[0].source  # no [failover]: the same as before
+        failover = self.raw.get("failover", {})
         return FailoverSource(
-            primary=Member(primary),
-            fallbacks=[Member(SOURCES.create(e["type"], e),
-                              poll_interval_s=float(e.get("poll_interval_s", DEFAULT_FALLBACK_POLL_S)))
-                       for e in entries],
+            primary=members[0],
+            fallbacks=members[1:],
             after_s=float(failover.get("after_s", DEFAULT_FAILOVER_AFTER_S)),
             retry_s=float(failover.get("retry_s", DEFAULT_FAILOVER_RETRY_S)),
             retry_max_s=float(failover.get("retry_max_s", DEFAULT_FAILOVER_RETRY_MAX_S)),
@@ -118,7 +203,8 @@ class App:
     def settings(self) -> DaemonSettings:
         source, display = self.raw["source"], self.raw["display"]
         after_s = float(self.raw.get("failover", {}).get("after_s", DEFAULT_FAILOVER_AFTER_S))
-        if self.raw.get("failover", {}).get("sources") and after_s >= float(source["stale_after_s"]):
+        failover = self.raw.get("failover", {})
+        if len(self.source_chain()) > 1 and after_s >= float(source["stale_after_s"]):
             raise ValueError(f"[failover] after_s ({after_s}) must be less than "
                              f"[source] stale_after_s ({source['stale_after_s']}), "
                              "or the LEDs show 'unknown' before a fallback is used")

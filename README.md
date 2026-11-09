@@ -59,8 +59,10 @@ tells [which modules your PC needs](docs/SETUP.md#2-choose-the-modules).
 | `alerts_com_ua` | Alerts from alerts.com.ua, oblast level only. The service stopped updating its data (checked 2026-11-08) | No |
 | `json_http` (always in the build) | Any other JSON API, configured in `config.toml`. Each source above is a preset of it | Only if that API needs one |
 
-A second source can keep the LEDs correct when the first server is down: see
-[Failover](docs/SETUP.md#configuration) in the full guide.
+The app reads several sources, best data first, and uses the next one when a
+server is down: a service with a saved token, then `siren_pp_ua`, then
+`ubilling`. The [sources guide](docs/SOURCES.md) explains the order, and tells
+how to get a token and save it.
 
 ## Minimal setup
 
@@ -73,12 +75,16 @@ git clone https://github.com/omahasdev/alert-colors "%USERPROFILE%\alert-colors"
 ```
 
 1. `region` chooses your city. If Python 3.14 is not installed, type **y** to
-   install it with `winget`. Then type a part of the city name ("dnipro" finds
-   "Дніпро"), and type its number. You can also choose a community, a district or an oblast.
+   install it with `winget`. Then type a part of the city name ("kyiv" finds
+   "м. Київ"), and type its number. You can also choose a community, a district or an oblast.
 2. `install` builds, installs and starts the app. Accept the UAC prompt.
 
 To change the city later, run the `region` command again. It applies the new
 city to the running app.
+
+If you have a token for an official alert service, save it with
+`setup.cmd token`. The app then uses that service first, and keeps the keyless
+source as a backup. The [sources guide](docs/SOURCES.md#save-a-token) tells how to get a token and save it.
 
 Then, if you use ASUS devices, do this one time in Armoury Crate:
 
@@ -112,6 +118,11 @@ config, with the watched place). The full guide lists [all items that stay](docs
 a step-by-step clean install, the modules for your PC, all `setup.cmd`
 actions, your own config file, every setting in `config.toml`, the security model
 and troubleshooting.
+
+**Sources and tokens:** [docs/SOURCES.md](docs/SOURCES.md). It compares the
+alert sources, explains their order, and tells how to get and save a token for
+[ukrainealarm](docs/SOURCES.md#ukrainealarm) and
+[alerts_in_ua](docs/SOURCES.md#alerts_in_ua).
 
 **Configuration reference:** [docs/CONFIG.md](docs/CONFIG.md). It explains
 each config file and every setting, with its default.
@@ -190,7 +201,8 @@ Blue boxes are the exchangeable modules: sources and lighting. Gray boxes are th
 |---|---|---|
 | `sources/` | `AlertSource` | `fetch()` gives an `AlertStatus` |
 | `sources/json_http.py` | `JsonHttpSource` | Any JSON API from the config, with JMESPath fields |
-| `sources/failover.py` | `FailoverSource` | `[source]` first, then the fallback sources of `[failover]` when it has no data |
+| `sources/failover.py` | `FailoverSource` | The sources in the order of use: the next one when the first has no data |
+| `user_env.py` | | Tokens in the user environment (`setup.cmd token`), never in a config file |
 | `sources/siren_pp_ua.py`, `ukrainealarm.py`, `ubilling.py`, `alerts_in_ua.py`, `alerts_com_ua.py` | (presets, no class) | Optional named defaults for known APIs |
 | `policy.py` | `Policy` | Ordered rules: `AlertStatus` to a scene name |
 | `scenes.py` | `Scene` | An effect, or a release: each backend gives its LEDs back to its vendor app |
@@ -216,10 +228,11 @@ To add a part, write one module and register it by name:
   `effects.py`. The configurator shows its form automatically.
 
 ```
-setup.cmd                    double-click: build, install, update, restart, status, uninstall
+setup.cmd                    double-click: build, install, update, restart, status, uninstall, region, token
 configure.cmd                double-click: the configurator
 docs\COMMANDS.md             all commands: setup.cmd actions and options, the exe command line
 docs\CONFIG.md               all settings: each config file, section and key, with defaults
+docs\SOURCES.md              the alert sources, their order, and how to get and save a token
 scripts\manage.ps1           the logic of setup.cmd
 build.toml                   build profile: the optional modules
 config.toml                  all settings (the defaults); examples\sources\: a block for each source

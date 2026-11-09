@@ -12,7 +12,7 @@ from alert_colors.sources.json_http import FieldError
 ROOT = Path(__file__).resolve().parents[1]
 UBILLING = ROOT / "examples" / "sources" / "ubilling.toml"
 KYIV = ZoneInfo("Europe/Kyiv")
-REGION = "Дніпропетровська область"
+REGION = "Київська область"  # the oblast of examples/sources/ubilling.toml
 CITY, RAION, OBLAST, OTHER_RAION, OTHER_OBLAST = "1001", "101", "9", "102", "5"
 
 
@@ -124,12 +124,30 @@ def test_config_overrides_preset_values():
 
 
 def test_preset_without_its_variable_fails_at_start():
-    with pytest.raises(KeyError, match="region"):
+    from alert_colors.sources.preset import NotConfiguredError
+
+    with pytest.raises(NotConfiguredError, match="region"):
         SOURCES.create("ubilling", {})
 
 
+def test_ubilling_takes_the_oblast_name_of_the_place():
+    source = SOURCES.create("ubilling", {"vars": {"oblast_name": "Київська область"}})
+    assert source.variables["region"] == "Київська область"
+
+
+def test_an_old_ubilling_region_wins_over_the_oblast_name():
+    source = SOURCES.create("ubilling", {"vars": {"region": "Львівська область", "oblast_name": "x"}})
+    assert source.variables["region"] == "Львівська область"
+
+
+def test_alerts_in_ua_takes_the_region_ids(monkeypatch):
+    monkeypatch.setenv("ALERTS_IN_UA_TOKEN", "t")
+    source = SOURCES.create("alerts_in_ua", {"vars": {"region_id": "155", "district_id": "38", "oblast_id": "3"}})
+    assert (source.variables["city_uid"], source.variables["raion_uid"], source.variables["oblast_uid"])         == ("155", "38", "3")
+
+
 # ---- ukrainealarm (official) and its keyless mirror siren_pp_ua -----------
-CITY_ID, DISTRICT_ID, OBLAST_ID = "332", "44", "9"
+CITY_ID, DISTRICT_ID, OBLAST_ID = "155", "38", "3"
 OTHER_COMMUNITY, OTHER_OBLAST_REGION = "353", "1000"
 NEARBY = [DISTRICT_ID, CITY_ID, "48", OTHER_COMMUNITY]   # what the lookup reads from /regions
 UA_VARS = {"region_id": CITY_ID, "district_id": DISTRICT_ID, "oblast_id": OBLAST_ID}
@@ -239,3 +257,12 @@ def test_change_marker_skips_full_request_until_it_changes(monkeypatch):
     clock["t"] = source.marker.max_age_s + 1
     source.fetch()                                        # too old: marker + full
     assert calls == ["status", "alerts", "status", "status", "alerts", "status", "alerts"]
+
+
+def test_old_alerts_in_ua_uids_win_over_the_region_ids(monkeypatch):
+    """An older config that gives the UIDs itself keeps them."""
+    monkeypatch.setenv("ALERTS_IN_UA_TOKEN", "t")
+    source = SOURCES.create("alerts_in_ua", {"vars": {"city_uid": "1", "raion_uid": "2", "oblast_uid": "3",
+                                                      "region_id": "155", "district_id": "38", "oblast_id": "3"}})
+    assert (source.variables["city_uid"], source.variables["raion_uid"], source.variables["oblast_uid"]) \
+        == ("1", "2", "3")

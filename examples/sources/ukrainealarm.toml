@@ -1,7 +1,9 @@
 # ukrainealarm.com: the official API of the "Повітряна тривога" app.
 # Region level down to hromada, with alert types.
-# Put the API key (request form on https://api.ukrainealarm.com) in the
-# environment variable UKRAINEALARM_API_KEY.
+# You do not need this block: with a saved API key (setup.cmd token), the app
+# uses ukrainealarm before [source] by itself. Use it only to make it [source].
+# Request the key on https://api.ukrainealarm.com. Save it: setup.cmd token
+# (the environment variable UKRAINEALARM_API_KEY, never this file).
 [source]
 type = "ukrainealarm"
 poll_interval_s = 1           # each poll fetches only lastActionIndex (38 bytes)
@@ -9,9 +11,9 @@ backoff_max_s = 60
 stale_after_s = 180
 
 [source.vars]
-region_id = "332"             # м. Дніпро та Дніпровська ТГ; GET /api/v3/regions lists all ids
-district_id = "44"            # its district (an alert there covers the city)
-oblast_id = "9"               # its oblast; alerts elsewhere in it give "partial"
+region_id = "0"               # Тестовий регіон (the test region); setup.cmd region writes the place
+district_id = "0"             # its district (an alert there covers the place)
+oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial"
 
 # [source.change_marker]
 # max_age_s = 300             # a full request at least this often, even with no change

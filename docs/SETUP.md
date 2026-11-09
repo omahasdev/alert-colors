@@ -52,7 +52,7 @@ remove it as the table at the end of this section shows.
 | `razer_chroma` | Razer Chroma devices: keyboards (one color for each of 22 columns), mice, and other Chroma devices | Razer Synapse, with Chroma apps allowed | No |
 | `console` (always in the build) | No hardware: writes each scene change to the log. For tests, and for a build without lighting modules | Nothing | No |
 
-**Source modules: they read the status from an API**
+**Source modules: they read the status from an API.** The [sources guide](SOURCES.md) tells how to get a token and configure it.
 
 | Module | What it is for | API key required | Smallest area |
 |---|---|---|---|
@@ -153,13 +153,14 @@ The first install asks this question in step 5. If you ran `setup.cmd region`
 before the install, the install does not ask again.
 
 You can choose a community (hromada), a district (raion) or an oblast. The
-setup writes three ids into `[source.vars]`:
+setup writes these values into `[source.vars]`:
 
-| Variable | Meaning | Example: Dnipro |
+| Variable | Meaning | The test region |
 |---|---|---|
-| `region_id` | The watched place | `332` |
-| `district_id` | Its district: an alert there covers the place | `44` |
-| `oblast_id` | Its oblast: an alert there covers the place, and an alert elsewhere in it gives the partial state (P) | `9` |
+| `region_id` | The watched place | `0` |
+| `district_id` | Its district: an alert there covers the place | `0` |
+| `oblast_id` | Its oblast: an alert there covers the place, and an alert elsewhere in it gives the `partial` scene | `0` |
+| `oblast_name` | The name of its oblast, for sources that know only oblasts | `""` |
 
 The tree of the API has some cities at the top level, with no children:
 Kharkiv and Zaporizhzhia. The picker links them to their oblast and district
@@ -197,6 +198,7 @@ actions, their options and the command line of the exe.
 | 6 | Build | Build only | For development |
 | 7 | Configurator | Open the configurator (the same as `configure.cmd`) | To tune colors and effects |
 | 8 | Watched place | Search the place, save it in the config of your PC, apply it | To watch a different place |
+| 9 | Tokens | Save, test or remove the token of an alert service. The app then uses that service first | After you get a token |
 
 The build runs with your normal rights. Only the install part asks for admin
 rights (one UAC prompt each time).
@@ -260,7 +262,7 @@ each source. For any other JSON API, use `type = "json_http"`
 | `[source.time]` | `format` (`iso`, `epoch`, or a strftime pattern), `timezone` |
 | `[source.change_marker]` | Optional cheap pre-check: `url`, `field`, `max_age_s`. Each poll fetches only the marker; the full request runs when it changes or after `max_age_s`. `siren_pp_ua` and `ukrainealarm` use `lastActionIndex` (38 bytes). |
 
-Region: the setup writes the ids (see [Choose your region](#choose-your-region)). For example, `region_id = "332"` is "м. Дніпро та Дніпровська територіальна громада".
+Region: the setup writes the ids (see [Choose your region](#choose-your-region)). For example, `region_id = "0"` is "Тестовий регіон", the test region of the API.
 All ids (oblast > district > community): https://siren.pp.ua/api/v3/regions.
 The response for a region lists every alert that covers it, also the alerts of
 its district and oblast, so the city lights up for a district alert too.
@@ -274,40 +276,18 @@ an official key, switch to `ukrainealarm` (same API, the key in
 An expression that gives no value (for example, a wrong region name) is an
 error, and the LEDs show `unknown`. It is never read as "no alert".
 
-**Failover.** A fallback source keeps the LEDs correct when the server of
-`[source]` is down. `[[failover.sources]]` lists the fallbacks in order. Each
-entry takes the keys of `[source]`, and gets the `[source.vars]` of `[source]`.
-Its own `[failover.sources.vars]` replace single values. Without
-`[[failover.sources]]`, the app reads only `[source]`, as before.
+**Sources and failover.** The app reads several sources, best data first:
+the services whose token you saved with `setup.cmd token`, then `[source]`
+(`siren_pp_ua`), then the backup `ubilling`. It uses the next source when the
+first one had no data for 30 s, or at once when a token is refused. It goes
+back to the first source when that works again. `setup.cmd region` writes the
+place for all sources, so no source needs its own IDs. The
+[sources guide](SOURCES.md) explains the order and the tokens, and the
+[configuration reference](CONFIG.md#failover-the-order-of-the-sources) lists
+the settings.
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `[failover] after_s` | 30 | Use a fallback when `[source]` had no success for this long. It must be less than `stale_after_s` |
-| `[failover] retry_s` | 10 | After a failure, skip the source for this long. Keep it less than `after_s`, so that one timeout does not switch |
-| `[failover] retry_max_s` | 120 | The skip time doubles after each failure in a row, up to this value |
-| `poll_interval_s` in an entry | 10 | Fetch this fallback at most this often. Between fetches, the app uses its last status |
-
-`[source]` is always the first choice. HTTP 429 never switches to a fallback:
-the server works, and the app keeps the last status. While a fallback is in use,
-the app tries `[source]` again after each skip time, and goes back to it when it
-works. The log shows `using fallback <name>` and `<name> works again`.
-
-Example: `ubilling` as the fallback of `siren_pp_ua`. It needs no key, but it
-has oblast level only. While it is in use, an alert anywhere in the oblast
-shows the `alert` scene, never `partial`. The `region` value is the oblast name
-as the feed spells it:
-
-```toml
-[[failover.sources]]
-type = "ubilling"
-poll_interval_s = 10
-[failover.sources.vars]
-region = "Київська область"
-```
-
-`setup.cmd region` changes only `[source.vars]`. If you choose a place in
-another oblast, change `region` of the fallback too. A wrong name fails the
-check before each install, and it never shows "no alert".
+While `ubilling` is in use, an alert anywhere in the oblast shows the `alert`
+scene, never `partial`: ubilling has oblast level only.
 
 **Rules.** `[[rules]]` select the scene. The first rule that matches wins, so
 the order is the priority. Conditions: `state` (`ok` / `unknown`), `active`,
@@ -423,7 +403,7 @@ The first change makes the backup `ProcessList.ini.alert-colors.bak`.
 | The PC LEDs do not change | Wait 30 s after a start. Make sure that **AlertColors.exe** is at the top of the Armoury Crate priority list, and that **In-Game lighting effects** is on. |
 | Armoury Crate does not find its devices | The app was killed (see [Stop](#stop-never-kill-the-app)). Run `Restart-Service LightingService -Force` in an admin PowerShell, then restart Armoury Crate. |
 | The Razer devices do not change | Make sure that Synapse runs and that Chroma apps are allowed in Synapse. The log shows `backend razer_chroma failed` with the cause. |
-| The LEDs breathe purple (`unknown`) | The app has no fresh data. Make sure that the PC has internet access, then look at the log for the error. If the server of the source is down, add a fallback source (see **Failover** in [Configuration](#configuration)). |
+| The LEDs breathe purple (`unknown`) | The app has no fresh data. Make sure that the PC has internet access, then look at the log for the error. If the log shows that every source fails, wait: the app goes back to the normal colors at the first success. See [the order of the sources](SOURCES.md#the-order-of-the-sources). |
 | The log shows HTTP 429 | The API limits the request rate. The app waits and tries again: with siren.pp.ua, approximately one poll in 15 s gets 429. Do not run two copies of the app. |
 | `CHECK FAILED` in the setup | The console shows the cause. The old app runs unchanged. Correct the config, then run the action again. |
 | An error every 30 s for a module that you do not use | Set `enabled = false` in its `[[lighting]]` entry, or build without it (see [Choose the modules](#2-choose-the-modules)). |

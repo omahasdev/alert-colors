@@ -12,6 +12,8 @@
     restart    (elevated) Stop, copy config.toml, start. Use after a change in config.toml.
     uninstall  (elevated) Stop, remove the task, the Armoury Crate entry and the installed files.
     status     Show the process, the task, the Armoury Crate entry and the last log lines.
+    token      Save or remove the token of an alert service (user environment, no
+               config change), then restart the installed app.
 
     Security layout:
     - The app runs with admin rights. So it runs from $env:ProgramFiles\AlertColors,
@@ -32,7 +34,7 @@
     Runs one action without the menu.
 #>
 param(
-    [ValidateSet('', 'build', 'install', 'update', 'restart', 'uninstall', 'status', 'tune', 'region')]
+    [ValidateSet('', 'build', 'install', 'update', 'restart', 'uninstall', 'status', 'tune', 'region', 'token')]
     [string]$Action = '',
     [string]$Python = '',  # empty: find Python automatically (py launcher, then PATH)
     [string]$Lighting = '', # empty: build.toml; 'none'; or 'aura_sdk,razer_chroma'
@@ -77,7 +79,7 @@ $StopEventName = 'Local\AlertColors.Stop'  # = [service] stop_event in config.to
 $AdminActions = @('install', 'update', 'restart', 'uninstall')
 $BuildActions = @('build', 'install', 'update')
 $ConfigActions = @('install', 'update', 'restart')  # these copy config.toml: check it first
-$PlaceUnchanged = 3  # exit code of the region command: nothing to apply
+$PlaceUnchanged = 3  # exit code of the region and token commands: nothing to apply
 $WantedPython = (Get-Content (Join-Path $Root '.python-version') -Raw).Trim()
 $WingetPythonId = "Python.Python.$WantedPython"
 $Menu = [ordered]@{
@@ -89,6 +91,7 @@ $Menu = [ordered]@{
     '5' = @('uninstall', 'Uninstall: stop, remove autostart, Armoury Crate entry and files')
     '6' = @('build', 'Build only')
     '8' = @('region', 'Watched place: choose the city, community, district or oblast')
+    '9' = @('token', 'Tokens: save or remove the token of an alert service')
 }
 
 # -------------------------------------------------------------- helpers ----
@@ -211,6 +214,21 @@ function Test-Config {
         if ($wasRunning) { Start-ScheduledTask -TaskName $TaskName; Write-Output 'Started the old app again.' }
         throw "config.toml failed the check. Nothing was installed; the old app runs unchanged."
     }
+}
+
+function Set-Token {
+    # Saves or removes the token of one alert service in the user environment
+    # (no admin rights, no config change). Returns $true when a token changed.
+    if (-not (Test-Path $VenvPython)) { Initialize-Venv | Out-Host }
+    $env:PYTHONPATH = Join-Path $Root 'src'
+    try {
+        $tool = Start-Process -FilePath $VenvPython -NoNewWindow -Wait -PassThru `
+            -ArgumentList @('-m', 'alert_colors', '--config', "`"$SourceConfig`"", 'token')
+    }
+    finally { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+    if ($tool.ExitCode -eq $PlaceUnchanged) { return $false }
+    if ($tool.ExitCode -ne 0) { throw 'The token was not saved.' }
+    return $true
 }
 
 function Select-Place {
@@ -402,6 +420,11 @@ try {
 
     if ($Action -eq 'status') { Show-Status; return }
     if ($Action -eq 'tune') { & (Join-Path $Root 'configure.cmd'); return }
+    if ($Action -eq 'token') {
+        if (-not (Set-Token)) { return }
+        if (-not (Test-Path $InstallExe)) { Write-Output 'Saved. The app uses it after the install.'; return }
+        $Action = 'restart'  # the app orders its sources at the start
+    }
     if ($Action -eq 'region') {
         if (-not (Select-Place)) { return }
         if (-not (Test-Path $InstallExe)) { Write-Output 'Saved. Choose Install to start the app.'; return }

@@ -9,7 +9,7 @@ to install, and the [command reference](COMMANDS.md) lists the commands.
 - [The files](#the-files)
 - [Value types](#value-types)
 - [`[source]`: where the status comes from](#source-where-the-status-comes-from)
-- [`[failover]`: fallback sources](#failover-fallback-sources)
+- [`[failover]`: the order of the sources](#failover-the-order-of-the-sources)
 - [`[[rules]]`: status to scene](#rules-status-to-scene)
 - [`[scenes.<name>]`: what the LEDs show](#scenesname-what-the-leds-show)
 - [`[display]`: frames, brightness, taking the LEDs again](#display-frames-brightness-taking-the-leds-again)
@@ -27,6 +27,7 @@ to install, and the [command reference](COMMANDS.md) lists the commands.
 | `%APPDATA%\AlertColors\config.toml` | Your own config. `setup.cmd region` makes it from the project file and writes the watched place into it | You, and `setup.cmd region` | `setup.cmd restart` (or Update) checks it and copies it to Program Files |
 | `C:\Program Files\AlertColors\config.toml` | The copy that the app runs with | `setup.cmd` (admin) | Do not edit it: each install, update and restart replaces it |
 | `C:\ProgramData\AlertColors\tuning.json` | The changes from the configurator: scenes, brightness, color correction, preview | The configurator, and you | The running app reloads it within `[tuning] check_interval_s` |
+| `HKEY_CURRENT_USER\Environment` (your user environment) | The tokens of the alert services, never a config file | `setup.cmd token` | The next start of the app: `setup.cmd token` restarts it |
 | `build.toml` in the project folder | The modules that go into `AlertColors.exe` | You | The next `setup.cmd build`, Install or Update |
 
 Edit your own config, not the project file: `git pull` can then update the
@@ -46,7 +47,7 @@ setting, copy its lines from the project `config.toml` into your own config.
 | Factor | `brightness = 0.5` | 0 to 1. 1 is the full value |
 | Color | `color = "#FF4000"` | `#RRGGBB` in hex |
 | Color correction | `color_correction = [1.0, 0.69, 0.94]` | `[r, g, b]` factors, each 0 to 1 |
-| Text with placeholders | `url = "https://x/${region_id}"` | `${name}` takes a value of `[source.vars]`. `${env:NAME}` takes an environment variable, for tokens |
+| Text with placeholders | `url = "https://x/${region_id}"` | `${name}` takes a value of `[source.vars]`. `${env:NAME}` takes an environment variable (also from the user environment in the registry), for tokens |
 | Windows path | `file = '%ProgramData%\AlertColors\tuning.json'` | Use single quotes: a TOML literal string keeps the backslashes. `%NAME%` takes an environment variable |
 
 "Required" in the tables below means that the app does not start without the
@@ -60,25 +61,38 @@ value of the preset. `examples\sources\` has a complete block for each source.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `type` | Required | `siren_pp_ua`, `ukrainealarm`, `ubilling`, `alerts_in_ua`, `alerts_com_ua` or `json_http`. It must be in the build (see [`build.toml`](#buildtoml)) |
+| `type` | Required | `siren_pp_ua`, `ukrainealarm`, `ubilling`, `alerts_in_ua`, `alerts_com_ua` or `json_http`. It must be in the build (see [`build.toml`](#buildtoml)). It is the first source unless a service with a saved token comes before it (see [`[failover]`](#failover-the-order-of-the-sources)) |
 | `poll_interval_s` | Required | The wait after each successful fetch |
 | `backoff_max_s` | `poll_interval_s` | After errors in a row, the wait doubles up to this value. If the server sends `Retry-After`, the app obeys it |
 | `stale_after_s` | Required | Data older than this shows the `unknown` scene, never `clear` |
 
 ### `[source.vars]`: the watched place
 
-The values for the `${name}` placeholders. Each preset needs its own names:
+The values for the `${name}` placeholders. `setup.cmd region` writes the
+place one time for all sources:
 
-| Preset | Variables | Where to find the values |
+| Variable | Meaning | Used by |
 |---|---|---|
-| `siren_pp_ua`, `ukrainealarm` | `region_id`, `district_id`, `oblast_id` | `setup.cmd region` writes them. All IDs: https://siren.pp.ua/api/v3/regions |
-| `ubilling` | `region`: the oblast name as the feed spells it | https://ubilling.net.ua/aerialalerts/ |
-| `alerts_in_ua` | `city_uid`, `raion_uid`, `oblast_uid` | The location UIDs in the alerts.in.ua documentation |
-| `alerts_com_ua` | `state_id` | The state IDs of alerts.com.ua |
+| `region_id` | The ID of the place (community, district or oblast). All IDs: https://siren.pp.ua/api/v3/regions | `siren_pp_ua`, `ukrainealarm`, `alerts_in_ua` |
+| `district_id` | The ID of its district | the same |
+| `oblast_id` | The ID of its oblast | the same |
+| `oblast_name` | The name of its oblast, for example `"Київська область"` | `ubilling` |
 
-The token of `ukrainealarm` goes in the environment variable
-`UKRAINEALARM_API_KEY`, and the token of `alerts_in_ua` in
-`ALERTS_IN_UA_TOKEN`. Do not write a token into the config file.
+Some presets use other names. Each one takes its value from a variable of the
+table, unless the config gives it:
+
+| Preset | Its variable | Takes the value of |
+|---|---|---|
+| `alerts_in_ua` | `city_uid`, `raion_uid`, `oblast_uid` | `region_id`, `district_id`, `oblast_id` (alerts.in.ua uses the same numbers) |
+| `ubilling` | `region` | `oblast_name` |
+| `alerts_com_ua` | `state_id` | none: give it yourself |
+
+An older config that gives `city_uid` or `region` keeps that value.
+
+Tokens are never in the config file. `setup.cmd token` saves them in the
+user environment: `UKRAINEALARM_API_KEY` for `ukrainealarm` and
+`ALERTS_IN_UA_TOKEN` for `alerts_in_ua`. The [sources guide](SOURCES.md)
+tells how to get each token.
 
 ### `[source.request]`: the HTTP request
 
@@ -131,29 +145,46 @@ fetch fails and the LEDs show `unknown`. It is never read as "no alert".
 The kind names that the shipped rules use: `air_raid`, `artillery`,
 `urban_fights`, `chemical`, `nuclear`, `threat`, `other`.
 
-## `[failover]`: fallback sources
+## `[failover]`: the order of the sources
 
-Fallback sources keep the LEDs correct when the server of `[source]` is down.
-Without `[[failover.sources]]`, the app reads only `[source]`.
+The app reads its sources in this order:
+
+1. Each `[[failover.token_sources]]` entry whose token is saved.
+2. `[source]`.
+3. Each `[[failover.sources]]` entry.
+
+The first source of this order is the first choice. A config without
+`[failover]` gets the default token sources, and no backup. Thus it reads only
+`[source]` until a token is saved. The [sources guide](SOURCES.md#the-order-of-the-sources)
+explains the order.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `after_s` | `30` | Use a fallback when `[source]` had no success for this long. It must be less than `stale_after_s` |
+| `after_s` | `30` | Use the next source when the first one had no success for this long. It must be less than `stale_after_s` |
 | `retry_s` | `10` | After a failure, skip that source for this long. Keep it less than `after_s`, so that one timeout does not switch |
 | `retry_max_s` | `120` | The skip time doubles after each failure in a row, up to this value |
 
-Each `[[failover.sources]]` entry is one fallback, in the order of use. It
-takes the keys of `[source]`, plus these:
+Each `[[failover.token_sources]]` and `[[failover.sources]]` entry is one
+source, in the order of use. It takes the keys of `[source]`, plus these:
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | `false` ignores the entry |
-| `poll_interval_s` | `10` | Fetch this fallback at most this often. Between fetches, the app uses its last status |
-| `[failover.sources.vars]` | the `[source.vars]` of `[source]` | Values that replace single variables, for example `region` for `ubilling` |
+| `poll_interval_s` | `10` | Fetch this source at most this often. Between fetches, the app uses its last status |
+| `vars` | the `[source.vars]` of `[source]` | Values that replace single variables |
 
-`[source]` is always the first choice, and HTTP 429 never switches. The app
-tries `[source]` again after each skip time, and goes back to it when it
-works. The [full setup guide](SETUP.md#configuration) has an example.
+Without `[[failover.token_sources]]`, the default is `ukrainealarm` (1 s), then
+`alerts_in_ua` (10 s). A token source without a saved token is not used, and
+that is no error. A token source that is the type of `[source]` is not added
+twice.
+
+The default `[[failover.sources]]` list is empty. The shipped config has one
+backup, `ubilling`, that takes `oblast_name`. A backup whose place variable is
+empty is not used.
+
+HTTP 429 never switches. A refused token (HTTP 401 or 403) switches at once,
+and that source is skipped for `retry_max_s`. The app tries the first source
+again after each skip time, and goes back to it when it works.
 
 ## `[[rules]]`: status to scene
 

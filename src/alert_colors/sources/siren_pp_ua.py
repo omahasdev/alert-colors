@@ -7,7 +7,7 @@ Region level down to hromada (city), with alert types.
     type = "siren_pp_ua"
     poll_interval_s = 1          # the mirror caches for 1 s (Cache-Control: max-age=1)
     [source.vars]
-    region_id = "332"            # м. Дніпро та Дніпровська територіальна громада
+    region_id = "0"              # Тестовий регіон (the test region); setup.cmd region writes it
 
 Region ids: GET https://siren.pp.ua/api/v3/regions (oblast > district > community).
 Everything else is the same as the `ukrainealarm` module: change detection with

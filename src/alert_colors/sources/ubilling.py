@@ -6,7 +6,10 @@ active alert has FULL coverage and the kind `air_raid`.
     [source]
     type = "ubilling"
     [source.vars]
-    region = "Дніпропетровська область"   # the oblast name as the feed spells it
+    oblast_name = "Київська область"   # setup.cmd region writes it
+
+`region` (the oblast name as the feed spells it) takes the value of
+`oblast_name`. An older config that gives `region` itself keeps working.
 
 Tested against the live feed on 2026-11-08. The feed answers HTTP 429 when
 polled too fast; the poller then backs off (see daemon.py).
@@ -29,4 +32,4 @@ DEFAULTS = {
     "time": {"format": "%Y-%m-%d %H:%M:%S", "timezone": "Europe/Kyiv"},
 }
 
-register_preset("ubilling", DEFAULTS)
+register_preset("ubilling", DEFAULTS, aliases={"region": "oblast_name"})

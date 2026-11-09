@@ -3,11 +3,11 @@
     [source]
     type = "alerts_com_ua"
     [source.vars]
-    state_id = "3"          # the oblast id of this API: 3 = Dnipropetrovsk oblast
+    state_id = "<id>"       # the oblast id of this API: GET /api/states lists them
 
 Warning (checked 2026-11-08): the public data was frozen. `last_update` was
-more than 30 h old, and the Dnipropetrovsk oblast showed no alert while
-ubilling showed one. The staleness check then shows the "unknown" scene.
+more than 30 h old, and an oblast showed no alert while ubilling showed
+one. The staleness check then shows the "unknown" scene.
 Prefer the official `ukrainealarm` source.
 
 Response shape (from the backend source, github.com/and3rson/raid):

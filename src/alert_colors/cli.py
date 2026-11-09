@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
@@ -11,7 +12,7 @@ import time
 from pathlib import Path
 
 from . import power_events, process_events, stop_signal
-from .http import RateLimitedError
+from .http import RateLimitedError, token_refused
 from .config import DEFAULT_CONFIG, App
 from .frame import Frame
 
@@ -34,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     tune.add_argument("--no-browser", action="store_true", help="print the URL only")
     region = commands.add_parser("region", help="choose the watched city or community (writes config.toml)")
     region.add_argument("--id", help="set this region id without questions")
+    commands.add_parser("token", help="save or remove the token of an alert service (no config change)")
     preview = commands.add_parser("preview", help="show one scene on the hardware")
     preview.add_argument("scene")
     preview.add_argument("--seconds", type=float, required=True)
@@ -45,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     app.configure_logging(to_file=args.command in FILE_LOG_COMMANDS)
     handlers = {"run": _run, "stop": _stop, "check": _check, "status": _status,
                 "devices": _devices, "preview": _preview, "tune": _tune,
-                "region": _region}
+                "region": _region, "token": _token}
     return handlers[args.command](app, args)
 
 
@@ -111,34 +113,41 @@ def _fetch_with_retry(source):  # noqa: ANN001, ANN202
 def _check(app: App, args: argparse.Namespace) -> int:
     """The gate before an install: a config that cannot fetch is never deployed.
 
-    Each source is fetched once: the primary, then each fallback of [failover].
-    A config error in any source fails the check. A network error (the server
-    is down) fails the check only when no source gives a status: the install
-    of a fallback must be possible while the primary server is down.
+    Each source is fetched once, in the order of use (see App.source_chain).
+    A config error or a refused token in any source fails the check. A network
+    error (the server is down) fails the check only when no source gives a
+    status: the install of a fallback must be possible while a server is down.
     """
     try:
         scenes = app.scenes()
         policy = app.policy()
         app.settings()
         entries = app.lighting_entries()
-        sources = [app.source(), *app.fallback_sources()]
+        sources = app.check_sources()
     except Exception as error:  # noqa: BLE001  report every kind of config fault
         print(f"CHECK FAILED: {type(error).__name__}: {error}")
         return 1
+    usable = [source for _name, source, _why in sources if source is not None]
     first_status = None
-    for source in sources:
+    for name, source, why in sources:
+        if source is None:
+            print(f"source {name}: not used: {why}")
+            continue
         try:
             status = _fetch_with_retry(source)
         except OSError as error:  # the network or the server: maybe another source works
-            if len(sources) == 1:
+            if token_refused(error):  # a wrong token: a config error
+                print(f"CHECK FAILED: source {name}: the server refused the token: {error}")
+                return 1
+            if len(usable) == 1:
                 print(f"CHECK FAILED: {type(error).__name__}: {error}")
                 return 1
-            print(f"source {source.name}: NOT REACHABLE: {type(error).__name__}: {error}")
+            print(f"source {name}: NOT REACHABLE: {type(error).__name__}: {error}")
             continue
         except Exception as error:  # noqa: BLE001  a config fault: never deploy it
-            print(f"CHECK FAILED: source {source.name}: {type(error).__name__}: {error}")
+            print(f"CHECK FAILED: source {name}: {type(error).__name__}: {error}")
             return 1
-        print(f"source {source.name}: {status}")
+        print(f"source {name}: {status}")
         first_status = first_status or status
     if first_status is None:
         print("CHECK FAILED: no source gives a status")
@@ -178,8 +187,12 @@ def _region(app: App, args: argparse.Namespace) -> int:
             print(f"No place has the id {args.id}.")
             return 1
     else:
-        chosen = _ask_place(all_places)
-    if chosen is None or chosen == old:
+        chosen = _ask_place(all_places) or old  # Enter keeps the place
+    current_vars = app.raw["source"].get("vars", {})
+    # The same place, but a config of an older version can miss a variable
+    # (for example oblast_name): then write the place again.
+    if chosen is None or all(str(current_vars.get(name, "")) == value
+                             for name, value in chosen.variables().items()):
         print("The watched place did not change.")
         return EXIT_UNCHANGED
     text = args.config.read_text(encoding="utf-8")
@@ -209,21 +222,85 @@ def _ask_place(all_places):  # noqa: ANN001, ANN202
             return found[int(answer) - 1]
 
 
+def _token(app: App, args: argparse.Namespace) -> int:
+    """Save, test or remove the token of one alert service.
+
+    The token goes into the user environment (see user_env.py), never into a
+    config file. The app uses a service with a saved token before the
+    keyless source, in the order of App.source_chain.
+    """
+    import getpass
+
+    from . import user_env
+    from .sources import SOURCES
+    from .sources.preset import TOKENS, NotConfiguredError
+
+    services = [name for name in TOKENS if name in SOURCES.names()]
+    if not services:
+        print("This build has no alert service with a token.")
+        return EXIT_UNCHANGED
+    print("Alert services with a token (the app uses them first when the token is saved):")
+    for number, name in enumerate(services, start=1):
+        token = TOKENS[name]
+        saved = "saved" if user_env.get(token.variable) else "not saved"
+        print(f"  {number}. {name:<14} {saved:<10} get a token: {token.request_url}")
+    answer = input("Choose a number (Enter: no change): ").strip()
+    if not (answer.isdigit() and 1 <= int(answer) <= len(services)):
+        print("No change.")
+        return EXIT_UNCHANGED
+    name = services[int(answer) - 1]
+    token = TOKENS[name]
+    value = getpass.getpass(f"Paste the token of {name} (the input is hidden; Enter: remove it): ").strip()
+    if not value:
+        removed = user_env.delete(token.variable)
+        print(f"The token of {name} is removed." if removed else f"{name} had no saved token.")
+        return 0 if removed else EXIT_UNCHANGED
+    previous = os.environ.get(token.variable)
+    os.environ[token.variable] = value  # for the test only; user_env.put() saves it
+    try:
+        # The preset of the service, with the place of [source.vars].
+        source = SOURCES.create(name, {"type": name, "vars": app.raw["source"].get("vars", {})})
+        status = _fetch_with_retry(source)
+        print(f"Test OK: {status}")
+    except NotConfiguredError as error:
+        print(f"Not tested: {error}")
+    except OSError as error:
+        if token_refused(error):
+            print(f"The server refused the token ({error}). It is not saved.")
+            return 1
+        print(f"Not tested: the server does not answer ({error}). The token is saved anyway.")
+    finally:
+        _restore_env(token.variable, previous)
+    user_env.put(token.variable, value)
+    print(f"Saved in your user environment as {token.variable}.")
+    return 0
+
+
+def _restore_env(name: str, previous: str | None) -> None:
+    if previous is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = previous
+
+
 def _status(app: App, args: argparse.Namespace) -> int:
-    fallbacks = app.fallback_sources()
-    if not fallbacks:  # no [failover]: the same output as before
+    sources = app.check_sources()
+    if sum(source is not None for _name, source, _why in sources) == 1:  # one source: the output as before
         status = app.source().fetch()
         print(status)
         print("scene:", app.policy().select(status))
         return 0
     policy, any_ok = app.policy(), False
-    for source in [app.source(), *fallbacks]:
+    for name, source, why in sources:
+        if source is None:
+            print(f"source {name}: not used: {why}")
+            continue
         try:
             status = source.fetch()
         except Exception as error:  # noqa: BLE001  show each source
-            print(f"source {source.name}: FAILED: {type(error).__name__}: {error}")
+            print(f"source {name}: FAILED: {type(error).__name__}: {error}")
             continue
-        print(f"source {source.name}: {status}")
+        print(f"source {name}: {status}")
         print(f"  scene: {policy.select(status)}")
         any_ok = True
     return 0 if any_ok else 1

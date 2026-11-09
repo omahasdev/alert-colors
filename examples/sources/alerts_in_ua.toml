@@ -1,12 +1,15 @@
-# alerts.in.ua: city level, with alert types. Replace the [source] block of config.toml.
-# Put the token (https://devs.alerts.in.ua) in the environment variable ALERTS_IN_UA_TOKEN.
+# alerts.in.ua: city level, with alert types. You do not need this block: with a
+# saved token (setup.cmd token), the app uses alerts_in_ua before [source] by
+# itself. Use this block only to make it [source].
+# Request the token: https://alerts.in.ua/api-request. Save it: setup.cmd token
+# (the environment variable ALERTS_IN_UA_TOKEN, never this file).
 [source]
 type = "alerts_in_ua"
-poll_interval_s = 15          # the API allows few requests
+poll_interval_s = 15          # the API allows 8 to 10 requests per minute
 backoff_max_s = 300
 stale_after_s = 180
 
-[source.vars]                 # location_uid values from the alerts.in.ua documentation
-city_uid = "<city location_uid>"
-raion_uid = "<raion location_uid>"
-oblast_uid = "<oblast location_uid>"
+[source.vars]                 # setup.cmd region writes these IDs; alerts.in.ua uses the same numbers
+region_id = "0"               # Тестовий регіон (the test region); setup.cmd region writes the place
+district_id = "0"             # its district (an alert there covers the place)
+oblast_id = "0"               # its oblast; alerts elsewhere in it give "partial"

@@ -13,8 +13,11 @@ Rules:
 - After a failure that is not HTTP 429, a source is skipped for `retry_s`,
   doubled after each failure in a row, up to `retry_max_s`. Thus a primary
   source that times out does not delay each poll by its timeout.
-- A fallback is fetched at most once each `poll_interval_s`. Between fetches,
+- A source is fetched at most once each `poll_interval_s` of its entry (also
+  the first source: a token service can allow few requests). Between fetches,
   its last status is given again.
+- A refused token (HTTP 401 or 403) is not a short outage: that source is
+  skipped for `retry_max_s`, and the next source is used at once.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from ..domain import AlertStatus
-from ..http import RateLimitedError
+from ..http import RateLimitedError, token_refused
 from .base import AlertSource
 
 log = logging.getLogger(__name__)
@@ -44,11 +47,18 @@ class AllSourcesFailedError(OSError):
 @dataclass
 class Member:
     source: AlertSource
-    poll_interval_s: float = 0.0  # fallbacks: fetch at most this often
+    poll_interval_s: float = 0.0  # fetch at most this often; 0: at each poll of the daemon
     last_ok: float | None = None  # monotonic
     cached: AlertStatus | None = None
     failures: int = 0
     skip_until: float = 0.0
+    refused: bool = False  # the server refused the token
+
+    def fresh(self, now: float) -> AlertStatus | None:
+        """The last status, while it is younger than poll_interval_s."""
+        if self.cached is not None and self.last_ok is not None and now - self.last_ok < self.poll_interval_s:
+            return self.cached
+        return None
 
     @property
     def name(self) -> str:
@@ -80,6 +90,8 @@ class FailoverSource:
         now = self.monotonic()
         errors: list[str] = []
         primary_error: Exception | None = None
+        if (fresh := self.primary.fresh(now)) is not None:
+            return fresh
         if now >= self.primary.skip_until:
             try:
                 return self._success(self.primary, self.primary.source.fetch(), now)
@@ -90,19 +102,20 @@ class FailoverSource:
         else:
             errors.append(f"{self.primary.name}: skipped after an error")
         since_ok = now - (self.primary.last_ok if self.primary.last_ok is not None else self._started)
-        if since_ok < self.after_s:
+        if since_ok < self.after_s and not self.primary.refused:
             # Too early to switch: the daemon keeps the last status of the primary
             # and logs the error.
             if primary_error is not None:
                 raise primary_error
             raise AllSourcesFailedError(errors[0])
-        if primary_error is not None and not isinstance(primary_error, RateLimitedError):
+        transient = primary_error is not None and not isinstance(primary_error, RateLimitedError) \
+            and not token_refused(primary_error)
+        if transient:  # _failure() logs a refused token
             log.warning("source %s failed: %s (next try in %.0f s)", self.primary.name, primary_error,
                         self.primary.skip_until - now)
         for member in self.fallbacks:
-            if member.cached is not None and member.last_ok is not None \
-                    and now - member.last_ok < member.poll_interval_s:
-                return self._use(member, member.cached, since_ok)
+            if (fresh := member.fresh(now)) is not None:
+                return self._use(member, fresh, since_ok)
             if now < member.skip_until:
                 errors.append(f"{member.name}: skipped after an error")
                 continue
@@ -115,6 +128,7 @@ class FailoverSource:
 
     def _success(self, member: Member, status: AlertStatus, now: float) -> AlertStatus:
         member.last_ok, member.cached, member.failures, member.skip_until = now, status, 0, 0.0
+        member.refused = False
         if member is self.primary and self._active != member.name:
             log.info("source %s works again: fallback %s is no longer used", member.name, self._active)
             self._active = member.name
@@ -122,14 +136,20 @@ class FailoverSource:
 
     def _use(self, member: Member, status: AlertStatus, since_ok: float) -> AlertStatus:
         if self._active != member.name:
-            log.info("source %s: no data for %.0f s: using fallback %s",
-                     self.primary.name, since_ok, member.name)
+            reason = "its token was refused" if self.primary.refused else f"no data for {since_ok:.0f} s"
+            log.info("source %s: %s: using fallback %s", self.primary.name, reason, member.name)
             self._active = member.name
         return status
 
     def _failure(self, member: Member, error: Exception, now: float) -> None:
         if isinstance(error, RateLimitedError):
             member.skip_until = now + (error.retry_after_s or 0.0)  # the server works: no long skip
+            return
+        if token_refused(error):
+            if not member.refused:
+                log.error("source %s: the server refused the token (%s); next try in %.0f s. "
+                          "Save the token again with setup.cmd token", member.name, error, self.retry_max_s)
+            member.refused, member.skip_until = True, now + self.retry_max_s
             return
         member.failures += 1
         skip = min(self.retry_s * RETRY_FACTOR ** (member.failures - 1), self.retry_max_s)

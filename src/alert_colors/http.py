@@ -36,6 +36,14 @@ class UnsafeRequestError(ValueError):
 HTTP_TOO_MANY_REQUESTS = 429
 
 
+TOKEN_REFUSED = (401, 403)  # HTTP Unauthorized, Forbidden: the token is wrong or blocked
+
+
+def token_refused(error: BaseException) -> bool:
+    """True when the server refused the token: a config error, not a network error."""
+    return getattr(error, "code", None) in TOKEN_REFUSED
+
+
 class RateLimitedError(OSError):
     """HTTP 429. `retry_after_s` is the server's Retry-After, when it gives seconds."""
 

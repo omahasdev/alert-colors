@@ -23,11 +23,12 @@ from .sources.ukrainealarm_api import REGION_TREE_LOOKUP
 
 FETCH_ATTEMPTS = 4
 FIRST_RETRY_WAIT_S = 2.0
-VAR_NAMES = ("region_id", "district_id", "oblast_id")
+VAR_NAMES = ("region_id", "district_id", "oblast_id", "oblast_name")
+TEST_REGION_ID = "0"  # "Тестовий регіон" of the API: no real place
 _FEMININE_ENDING = "а"  # "Харківська" -> stem "Харківськ" -> "Харківський район"
 
 # Ukrainian to Latin (the official transliteration of 2010, without the special
-# forms at the start of a word), so "dnipro" finds "Дніпро".
+# forms at the start of a word), so "kyiv" finds "Київ".
 _LATIN = {
     "а": "a", "б": "b", "в": "v", "г": "h", "ґ": "g", "д": "d", "е": "e", "є": "ie",
     "ж": "zh", "з": "z", "и": "y", "і": "i", "ї": "i", "й": "i", "к": "k", "л": "l",
@@ -48,9 +49,11 @@ class Place:
     oblast_id: str
     name: str
     path: str  # "name, district, oblast": for the list
+    oblast_name: str = ""  # for sources that know only oblast names (ubilling)
 
     def variables(self) -> dict[str, str]:
-        return {"region_id": self.region_id, "district_id": self.district_id, "oblast_id": self.oblast_id}
+        return {"region_id": self.region_id, "district_id": self.district_id, "oblast_id": self.oblast_id,
+                "oblast_name": self.oblast_name}
 
 
 def latin(text: str) -> str:
@@ -66,14 +69,15 @@ def places(tree: dict[str, Any]) -> list[Place]:
         if not oblast.get("regionChildIds"):
             result.append(_top_level_city(oblast, states))
             continue
-        result.append(Place(oblast_id, oblast_id, oblast_id, oblast_name, oblast_name))
+        result.append(Place(oblast_id, oblast_id, oblast_id, oblast_name, oblast_name, oblast_name))
         for district in oblast["regionChildIds"]:
             district_id, district_name = district["regionId"], district["regionName"]
             result.append(Place(district_id, district_id, oblast_id, district_name,
-                                f"{district_name}, {oblast_name}"))
+                                f"{district_name}, {oblast_name}", oblast_name))
             for community in district.get("regionChildIds", []):
                 result.append(Place(community["regionId"], district_id, oblast_id, community["regionName"],
-                                    f"{community['regionName']}, {district_name}, {oblast_name}"))
+                                    f"{community['regionName']}, {district_name}, {oblast_name}",
+                                    oblast_name))
     if not result:
         raise RegionError("the region tree is empty")
     return result
@@ -86,7 +90,7 @@ def _top_level_city(city: dict[str, Any], states: list[dict[str, Any]]) -> Place
     область" and in "Харківський район": alerts there cover the city too. The
     API does not list this link, so the adjective in the name gives it. Kyiv
     city ("м. Київ") and "Тестовий регіон" belong to no oblast: they keep
-    their own id for each level.
+    their own id for each level, and their own name as the oblast name.
     """
     city_id, name = city["regionId"], city["regionName"]
     for oblast in states:
@@ -98,8 +102,9 @@ def _top_level_city(city: dict[str, Any], states: list[dict[str, Any]]) -> Place
         district_id = district["regionId"] if district else city_id
         district_part = f"{district['regionName']}, " if district else ""
         return Place(city_id, district_id, oblast["regionId"], name,
-                     f"{name}, {district_part}{oblast['regionName']}")
-    return Place(city_id, city_id, city_id, name, name)
+                     f"{name}, {district_part}{oblast['regionName']}", oblast["regionName"])
+    # "м. Київ" is an oblast-level name too. The test region has no oblast.
+    return Place(city_id, city_id, city_id, name, name, "" if city_id == TEST_REGION_ID else name)
 
 
 def search(all_places: Iterable[Place], text: str) -> list[Place]:
