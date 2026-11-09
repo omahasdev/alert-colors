@@ -108,6 +108,10 @@ a step-by-step clean install, the modules for your PC, all `setup.cmd`
 actions, the config of your PC, every configuration key, the security model
 and troubleshooting.
 
+**Command reference:** [docs/COMMANDS.md](docs/COMMANDS.md). It lists every
+`setup.cmd` action and option, and every `AlertColors.exe` command with its
+exit codes.
+
 ## Configurator
 
 Double-click **`configure.cmd`** in the project folder to tune the running app
@@ -205,6 +209,7 @@ To add a part, write one module and register it by name:
 ```
 setup.cmd                    double-click: build, install, update, restart, status, uninstall
 configure.cmd                double-click: the configurator
+docs\COMMANDS.md             all commands: setup.cmd actions and options, the exe command line
 scripts\manage.ps1           the logic of setup.cmd
 build.toml                   build profile: the optional modules
 config.toml                  all settings (the defaults); examples\sources\: a block for each source

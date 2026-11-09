@@ -184,7 +184,8 @@ update, compare the two files if you want the new defaults.
 ## Maintain: update, restart, uninstall
 
 Double-click **`setup.cmd`** and choose a number, or give the action as an
-argument (`setup.cmd status`):
+argument (`setup.cmd status`). The [command reference](COMMANDS.md) lists all
+actions, their options and the command line of the exe.
 
 | # | Action | What it does | When |
 |---|---|---|---|
@@ -399,6 +400,7 @@ Logs:
 
 ## Developer commands
 
+The [command reference](COMMANDS.md#alertcolorsexe-command-line) lists all commands with their exit codes.
 From the project root, with the venv that the build makes:
 
 ```
