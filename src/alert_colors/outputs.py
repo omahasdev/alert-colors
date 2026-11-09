@@ -31,6 +31,8 @@ class Output(Protocol):
 
     def release(self) -> None: ...
 
+    def reclaim(self) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -39,7 +41,13 @@ class _Release:
     pass
 
 
+@dataclass(frozen=True)
+class _Reclaim:
+    pass
+
+
 _RELEASE = _Release()
+_RECLAIM = _Reclaim()
 
 
 class BackendWorker:
@@ -66,6 +74,8 @@ class BackendWorker:
         self._correction = self._base_correction = correction  # per-channel factors (r, g, b)
         self._cond = threading.Condition()
         self._pending: Frame | _Release | None = None
+        # Not in the newest-wins mailbox: the next frame must not replace it.
+        self._reclaim_requested = False
         self._closing = False
         self._thread = threading.Thread(target=self._loop, name=f"backend-{self.name}", daemon=True)
         self._thread.start()
@@ -81,6 +91,12 @@ class BackendWorker:
 
     def release(self) -> None:
         self._post(_RELEASE)
+
+    def reclaim(self) -> None:
+        with self._cond:
+            if not self._closing:
+                self._reclaim_requested = True
+                self._cond.notify()
 
     def close(self) -> None:
         with self._cond:
@@ -100,20 +116,27 @@ class BackendWorker:
     def _loop(self) -> None:
         while True:
             with self._cond:
-                self._cond.wait_for(lambda: self._pending is not None or self._closing)
+                self._cond.wait_for(lambda: self._pending is not None or self._reclaim_requested
+                                    or self._closing)
                 command, self._pending = self._pending, None
+                reclaim, self._reclaim_requested = self._reclaim_requested, False
                 closing = self._closing
-            if command is not None and not self._run(command):
+            ok = self._run(_RECLAIM) if reclaim and not closing else True
+            if ok and command is not None:
+                ok = self._run(command)
+            if not ok:
                 self._safe_release()
                 with self._cond:  # back off; close() wakes us at once
                     self._cond.wait_for(lambda: self._closing, timeout=self._retry_s)
             if closing:
                 return
 
-    def _run(self, command: Frame | _Release) -> bool:
+    def _run(self, command: Frame | _Release | _Reclaim) -> bool:
         try:
             if isinstance(command, _Release):
                 self._backend.release()
+            elif isinstance(command, _Reclaim):
+                self._backend.reclaim()
             else:
                 self._backend.show(command)
             return True

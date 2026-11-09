@@ -23,6 +23,15 @@ class LightingBackend(Protocol):
 
     def release(self) -> None: ...
 
+    def reclaim(self) -> None:
+        """Take the LEDs again, and send the next frame even if it did not change.
+
+        A vendor app can take the LEDs back without a message to the app (the
+        ASUS service does it each time the display turns on). Only call it while
+        the backend controls the LEDs; without control, do nothing.
+        """
+        ...
+
     def describe(self) -> list[str]:
         """Human-readable list of the devices this backend controls."""
         ...

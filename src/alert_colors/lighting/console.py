@@ -25,6 +25,9 @@ class ConsoleBackend:
             log.info("console LED -> %s", shown)
             self._last = key
 
+    def reclaim(self) -> None:
+        pass  # the log has no other owner
+
     def release(self) -> None:
         if self._last is not None:
             log.info("console LED released")

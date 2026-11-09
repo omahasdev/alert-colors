@@ -21,6 +21,10 @@ from .tuning import TuningWatcher, resolve_path
 from .sources import SOURCES, AlertSource
 
 DEFAULT_CONFIG = Path("config.toml")
+# Take the LEDs again (see power_events.py): for a config without these keys.
+DEFAULT_RECLAIM_INTERVAL_S = 300.0  # a fallback for takeovers without a wake event
+DEFAULT_RECLAIM_AFTER_WAKE_S = 60.0  # the ASUS service applied its profile 12 s after the event
+DEFAULT_RECLAIM_STEP_S = 5.0
 log = logging.getLogger(__name__)
 
 
@@ -70,6 +74,9 @@ class App:
             frame_interval_s=float(display["frame_interval_s"]),
             backoff_max_s=float(source.get("backoff_max_s", source["poll_interval_s"])),
             brightness=float(display.get("brightness", FULL_BRIGHTNESS)),
+            reclaim_interval_s=float(display.get("reclaim_interval_s", DEFAULT_RECLAIM_INTERVAL_S)),
+            reclaim_after_wake_s=float(display.get("reclaim_after_wake_s", DEFAULT_RECLAIM_AFTER_WAKE_S)),
+            reclaim_step_s=float(display.get("reclaim_step_s", DEFAULT_RECLAIM_STEP_S)),
         )
 
     def outputs(self, dry_run: bool = False) -> list[BackendWorker]:

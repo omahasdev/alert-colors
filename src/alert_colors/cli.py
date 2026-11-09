@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import stop_signal
+from . import power_events, stop_signal
 from .http import RateLimitedError
 from .config import DEFAULT_CONFIG, App
 from .frame import Frame
@@ -66,7 +66,12 @@ def _stop_event() -> threading.Event:
 def _run(app: App, args: argparse.Namespace) -> int:
     stop = _stop_event()
     handle = stop_signal.watch(app.stop_event_name(), stop)  # noqa: F841  keep alive
-    app.daemon(dry_run=args.dry_run).run(stop)
+    daemon = app.daemon(dry_run=args.dry_run)
+    stop_power_events = power_events.watch(daemon.request_reclaim)
+    try:
+        daemon.run(stop)
+    finally:
+        stop_power_events()
     return 0
 
 

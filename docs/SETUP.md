@@ -316,6 +316,13 @@ its maximum (120 LEDs). If fewer LEDs are connected, set `led_counts =
 { "AddressableStrip 1" = 30 }` in the `aura_sdk` entry, so that a per-LED
 effect spans the real strip.
 
+**Taking the LEDs again.** A vendor app can take the LEDs back without a
+message to the app. The ASUS service does it each time the display turns on.
+The app listens for "display on" and "resume from sleep", then takes the LEDs
+again every `reclaim_step_s` (5 s) for `reclaim_after_wake_s` (60 s). It also
+takes them again every `reclaim_interval_s` (300 s) at any time, for other
+causes. All three keys are in `[display]`.
+
 **Brightness.** `[display] brightness` scales every color. `brightness` in a
 `[[lighting]]` entry scales one backend.
 
@@ -378,6 +385,7 @@ The first change makes the backup `ProcessList.ini.alert-colors.bak`.
 | The log shows HTTP 429 | The API limits the request rate. The app waits and tries again: with siren.pp.ua, approximately one poll in 15 s gets 429. Do not run two copies of the app. |
 | `CHECK FAILED` in the setup | The console shows the cause. The old app runs unchanged. Correct the config, then run the action again. |
 | An error every 30 s for a module that you do not use | Set `enabled = false` in its `[[lighting]]` entry, or build without it (see [Choose the modules](#2-choose-the-modules)). |
+| The PC LEDs show the Armoury Crate effect after the display turns on | The app takes them again within 5 s. If it does not, look for `display on or resume` in the log. Without that line, the app gets no power events: restart it with `setup.cmd restart`. |
 | The configurator does not open | Run `configure.cmd` again. The page runs only on `127.0.0.1`, and it closes after 30 min without use. |
 | The antivirus reports `AlertColors.exe` | Some antivirus programs flag PyInstaller builds. You built the exe on your PC from this source: add an exception for `C:\Program Files\AlertColors`. |
 
@@ -420,6 +428,14 @@ APIs. They explain the values of some settings.
   back, and the SDK restores the Armoury Crate profile.
 - Armoury Crate "Breathing" runs in the controller hardware: it continues
   until the app writes colors.
+- Each time the display turns on, the ASUS service takes the Aura token back
+  (`WM_POWERBROADCAST`, `PBT_POWERSETTINGCHANGE`). It took the token 0.2 s after
+  the event, and applied its own profile to the devices 12 s after the event.
+  The SDK in the app gets no error: its colors only stop showing. "Display off"
+  does not take the token.
+- One `SwitchMode()` adds approximately 14 lines (1.5 KB) to `AuraSDK.log`,
+  which the ASUS service does not rotate, and approximately 43 lines to
+  `LightingService.log`, which it rotates. So `reclaim_interval_s` is 300 s, not less.
 - ubilling answers HTTP 429 when polled too fast (twice in 17 min at 1 s).
 - siren.pp.ua allows approximately 1 request per second for each IP; the
   global `lastActionIndex` changed approximately every 7 s.

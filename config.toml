@@ -157,6 +157,11 @@ frame_interval_s = 0.1        # one Aura apply of all LEDs takes less than 0.1 s
 backend_retry_s = 30          # after a backend error, wait this long before retry
 backend_close_timeout_s = 90  # on exit, wait this long for each backend to release;
                               # the ASUS service needed 44 s for one release (2026-11-08)
+# A vendor app can take the LEDs back without a message to the app: the ASUS
+# service does it each time the display turns on. The app then takes them again.
+reclaim_after_wake_s = 60     # after the display turns on or the PC resumes, for this long ...
+reclaim_step_s = 5            # ... take the LEDs again this often
+reclaim_interval_s = 300      # and also this often at any time; 0 = never by time
 
 # ============================================================== lighting ====
 # Each [[lighting]] entry is one backend. `type` selects a registered backend.

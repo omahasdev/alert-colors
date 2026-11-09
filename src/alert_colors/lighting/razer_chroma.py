@@ -78,6 +78,9 @@ class RazerChromaBackend:
         if not sent and time.monotonic() - self._last_request >= self.heartbeat_interval_s:
             self._put("heartbeat")
 
+    def reclaim(self) -> None:
+        self._last = {}  # send the effects again with the next frame
+
     def release(self) -> None:
         if self._uri is None:
             return

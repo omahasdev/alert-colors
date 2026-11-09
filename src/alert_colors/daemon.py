@@ -35,6 +35,10 @@ class DaemonSettings:
     frame_interval_s: float
     backoff_max_s: float = 0.0  # 0: no backoff, always wait poll_interval_s
     brightness: float = FULL_BRIGHTNESS  # global factor for every color
+    # A vendor app can take the LEDs back without a message (see power_events.py).
+    reclaim_interval_s: float = 0.0  # take them again this often; 0: never by time
+    reclaim_after_wake_s: float = 0.0  # after a wake event, take them again for this long ...
+    reclaim_step_s: float = 1.0  # ... this often
 
 
 @dataclass
@@ -55,6 +59,8 @@ class Daemon:
     wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     _sample: _Sample | None = field(default=None, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    _reclaim_until: float = field(default=0.0, init=False)  # monotonic; set by request_reclaim()
+    _last_reclaim: float | None = field(default=None, init=False)
     _scene: str | None = field(default=None, init=False)
     _scene_started: float = field(default=0.0, init=False)
     _released: bool = field(default=True, init=False)
@@ -136,6 +142,31 @@ class Daemon:
         self._released = False
         for output in self.outputs:
             output.show(frame)
+        self._reclaim_if_due(now)
+
+    def request_reclaim(self) -> None:
+        """A wake event (any thread): take the LEDs again for a while.
+
+        The ASUS service took its token 0.2 s after the event, but applied its
+        profile to the devices 12 s later. So one reclaim is not enough: the
+        daemon takes the LEDs again every reclaim_step_s for reclaim_after_wake_s.
+        """
+        with self._lock:
+            self._reclaim_until = self.monotonic() + self.settings.reclaim_after_wake_s
+        log.info("display on or resume: taking the LEDs again for %ss", self.settings.reclaim_after_wake_s)
+
+    def _reclaim_if_due(self, now: float) -> None:
+        if self._last_reclaim is None:
+            self._last_reclaim = now  # control was just taken with the first frame
+            return
+        since = now - self._last_reclaim
+        with self._lock:
+            after_wake = now < self._reclaim_until
+        interval = self.settings.reclaim_interval_s
+        if (after_wake and since >= self.settings.reclaim_step_s) or (interval and since >= interval):
+            self._last_reclaim = now
+            for output in self.outputs:
+                output.reclaim()
 
     def release_all(self) -> None:
         if self._released:

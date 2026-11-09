@@ -6,6 +6,9 @@ Measured facts:
   card). The motherboard and the ARGB headers need an elevated process.
 - `SwitchMode()` takes the LEDs from Armoury Crate. `ReleaseControl(0)` gives
   them back.
+- The ASUS service takes the LEDs back each time the display turns on, and the
+  SDK of this process gets no error: its Apply() calls only stop showing. So
+  `reclaim()` calls SwitchMode() again (see power_events.py).
 - The first `Enumerate()` in a process takes ~30 s (elevated). Later calls,
   and SwitchMode/ReleaseControl, take ~0 s. So the SDK object and the device
   list live as long as the process, and release only gives up control.
@@ -109,6 +112,13 @@ class AuraSdkBackend:
         except Exception:
             self._sdk, self._controlling = None, False  # reconnect on the next show
             raise
+
+    def reclaim(self) -> None:
+        if not self._controlling:
+            return  # the next show() takes control anyway
+        self._sdk.SwitchMode()
+        self._last = {}  # the service applied its own profile: send every color again
+        log.debug("Aura control taken again")
 
     def release(self) -> None:
         if not self._controlling:
