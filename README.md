@@ -113,6 +113,9 @@ a step-by-step clean install, the modules for your PC, all `setup.cmd`
 actions, your own config file, every setting in `config.toml`, the security model
 and troubleshooting.
 
+**Configuration reference:** [docs/CONFIG.md](docs/CONFIG.md). It explains
+each config file and every setting, with its default.
+
 **Command reference:** [docs/COMMANDS.md](docs/COMMANDS.md). It lists every
 `setup.cmd` action and option, and every `AlertColors.exe` command with its
 exit codes.
@@ -216,6 +219,7 @@ To add a part, write one module and register it by name:
 setup.cmd                    double-click: build, install, update, restart, status, uninstall
 configure.cmd                double-click: the configurator
 docs\COMMANDS.md             all commands: setup.cmd actions and options, the exe command line
+docs\CONFIG.md               all settings: each config file, section and key, with defaults
 scripts\manage.ps1           the logic of setup.cmd
 build.toml                   build profile: the optional modules
 config.toml                  all settings (the defaults); examples\sources\: a block for each source

@@ -236,6 +236,9 @@ and skips it.
 
 ## Configuration
 
+The [configuration reference](CONFIG.md) lists every setting with its default.
+This section explains the primary settings with examples.
+
 The project `config.toml` has all settings, with a comment for each. Edit the config of your PC
 (`%APPDATA%\AlertColors\config.toml`), not the project file. After a change, choose **Restart**.
 

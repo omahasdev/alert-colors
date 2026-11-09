@@ -2,7 +2,8 @@
 
 All commands of alert-colors: the two double-click scripts, the actions of
 `setup.cmd`, and the command line of `AlertColors.exe`. The
-[full setup guide](SETUP.md) tells when to use them.
+[full setup guide](SETUP.md) tells when to use them, and the
+[configuration reference](CONFIG.md) lists every setting.
 
 ## Double-click scripts
 

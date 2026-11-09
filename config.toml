@@ -1,4 +1,5 @@
 # alert-colors configuration. All numbers, colors, API details and rules live here.
+# docs/CONFIG.md explains every setting.
 # After a change: setup.cmd -> Restart.
 
 # ================================================================ source ====
@@ -112,10 +113,9 @@ scene = "clear"               # N: no conditions, everything else
 
 # ================================================================ scenes ====
 # Each scene runs one effect, or gives the LEDs back (release = true).
-# Effects and options (brightness values are 0..1):
-#   solid  color, brightness
-#   pulse  color, period_s, min_brightness, max_brightness
-#   blink  color, period_s, duty, brightness, off_color
+# 13 effects, for example solid (color, brightness) and pulse (color, period_s,
+# min_brightness, max_brightness). docs/CONFIG.md and docs/SETUP.md list all
+# effects with their options; brightness values are 0..1.
 [scenes.clear]                # N: no active alert
 effect = "solid"
 color = "#00FF00"
