@@ -12,8 +12,10 @@ alerts_in_ua, alerts_com_ua) have their own ids: edit config.toml for them.
 
 from __future__ import annotations
 
+import json
 import re
 import time
+import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -78,6 +80,9 @@ def places(tree: dict[str, Any]) -> list[Place]:
                 result.append(Place(community["regionId"], district_id, oblast_id, community["regionName"],
                                     f"{community['regionName']}, {district_name}, {oblast_name}",
                                     oblast_name))
+    # The IDs go into URLs and into JMESPath filters ('${region_id}'): the server
+    # gives digits only, and any other value is not used.
+    result = [p for p in result if all(_ID.fullmatch(str(i)) for i in (p.region_id, p.district_id, p.oblast_id))]
     if not result:
         raise RegionError("the region tree is empty")
     return result
@@ -138,6 +143,10 @@ def find(all_places: Iterable[Place], region_id: str) -> Place | None:
     return next((p for p in all_places if p.region_id == region_id), None)
 
 
+# A longer wait of the server: the place picker stops at once, it does not hang.
+MAX_RETRY_WAIT_S = 60.0
+
+
 def fetch_tree(source: Any, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """The region tree, through the source's own request and network limits.
 
@@ -155,13 +164,30 @@ def fetch_tree(source: Any, sleep: Callable[[float], None] = time.sleep) -> dict
         except RateLimitedError as error:
             if attempt == FETCH_ATTEMPTS:
                 raise
-            sleep(error.retry_after_s or wait_s)
+            delay = error.retry_after_s or wait_s
+            if delay > MAX_RETRY_WAIT_S:
+                raise  # the server asks too long a wait: try again later
+            sleep(delay)
             wait_s *= 2
     raise AssertionError("unreachable")
 
 
+_ID = re.compile(r"[0-9]+")  # a region ID of the API
 _VARS_HEADER = re.compile(r"^\[source\.vars\][^\n]*\n", re.MULTILINE)
 _NEXT_TABLE = re.compile(r"^\s*\[", re.MULTILINE)
+
+
+def _toml_string(value: Any) -> str:
+    """A TOML basic string. The names and ids come from a server: a quote or a
+    line break in them must not add lines to config.toml, which the elevated
+    setup copies to Program Files. Without control characters, a JSON string is a
+    valid TOML basic string (TOML does not allow a raw DEL, which JSON keeps)."""
+    return json.dumps(_one_line(str(value)), ensure_ascii=False)
+
+
+def _one_line(text: str) -> str:
+    """Text for a comment: control characters (line breaks) become spaces."""
+    return "".join(" " if unicodedata.category(char).startswith("C") else char for char in text)
 
 
 def set_place(config_text: str, place: Place) -> str:
@@ -178,13 +204,14 @@ def set_place(config_text: str, place: Place) -> str:
     end = end_match.start() if end_match else len(config_text)
     table = config_text[start:end]
     for name, value in place.variables().items():
-        line = re.compile(rf'^({name}\s*=\s*)"[^"\n]*"([ \t]*#[^\n]*)?$', re.MULTILINE)
+        # A TOML basic string: escapes such as \" are part of the value (see _toml_string).
+        line = re.compile(rf'^({name}\s*=\s*)"(?:[^"\\\n]|\\.)*"([ \t]*#[^\n]*)?$', re.MULTILINE)
         match = line.search(table)
         if name == "region_id":
-            comment = f"  # {place.path}"
+            comment = f"  # {_one_line(place.path)}"
         else:
             comment = (match.group(2) or "") if match else ""
-        new_line = f'{match.group(1) if match else name + " = "}"{value}"{comment}'
+        new_line = f'{match.group(1) if match else name + " = "}{_toml_string(value)}{comment}'
         if match:
             table = table[:match.start()] + new_line + table[match.end():]
         else:

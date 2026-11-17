@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import power_events, process_events, stop_signal
+from . import network_events, power_events, process_events, stop_signal
 from .http import RateLimitedError, token_refused
 from .config import DEFAULT_CONFIG, App
 from .frame import Frame
@@ -51,7 +51,15 @@ def main(argv: list[str] | None = None) -> int:
     return handlers[args.command](app, args)
 
 
-def _stop_event() -> threading.Event:
+# Logoff and shutdown: Windows ends the process soon after it tells it (approximately 5 s).
+# The app waits this long for the LED release, then lets Windows go on.
+END_SESSION_WAIT_S = 5.0
+
+
+def _stop_event(finished: threading.Event | None = None) -> threading.Event:
+    """The stop event. `finished` (the daemon): set when the LEDs are released; a console
+    close, logoff or shutdown waits for it, because Windows ends the process when the
+    handler returns."""
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -59,23 +67,36 @@ def _stop_event() -> threading.Event:
         try:
             import win32api
 
-            win32api.SetConsoleCtrlHandler(lambda _event: stop.set() or True, True)
+            win32api.SetConsoleCtrlHandler(lambda _event: _stop_and_wait(stop, finished) or True, True)
         except Exception:  # noqa: BLE001  no console under pythonw
             pass
     return stop
 
 
+def _stop_and_wait(stop: threading.Event, finished: threading.Event | None) -> None:
+    stop.set()
+    if finished is not None:
+        finished.wait(END_SESSION_WAIT_S)
+
+
 def _run(app: App, args: argparse.Namespace) -> int:
-    stop = _stop_event()
-    handle = stop_signal.watch(app.stop_event_name(), stop)  # noqa: F841  keep alive
+    finished = threading.Event()  # set when daemon.run() returned: the LEDs are released
+    stop = _stop_event(finished)
+    handle = stop_signal.watch(app.stop_event_name(), stop, reset=True)  # noqa: F841  keep alive
+    running = None if args.dry_run else stop_signal.mark_running(app.stop_event_name())  # noqa: F841
     daemon = app.daemon(dry_run=args.dry_run)
-    stop_power_events = power_events.watch(daemon.request_reclaim)
+    stop_power_events = power_events.watch(daemon.request_reclaim,
+                                           on_end_session=lambda: _stop_and_wait(stop, finished))
     names, poll_s = app.vendor_watch()
     stop_process_events = process_events.watch(
         names, poll_s, lambda name: daemon.request_reclaim(f"{name} started"))
+    stop_network_events = (network_events.watch(daemon.network_changed)
+                           if daemon.settings.offline_retry_s > 0 else lambda: None)
     try:
         daemon.run(stop)
     finally:
+        finished.set()
+        stop_network_events()
         stop_process_events()
         stop_power_events()
     return 0
@@ -91,6 +112,8 @@ def _stop(app: App, args: argparse.Namespace) -> int:
 
 CHECK_ATTEMPTS = 5
 CHECK_FIRST_WAIT_S = 2.0
+# A longer wait of the server: the check fails at once (the setup must not hang for it).
+CHECK_MAX_WAIT_S = 60.0
 
 
 def _fetch_with_retry(source):  # noqa: ANN001, ANN202
@@ -104,6 +127,8 @@ def _fetch_with_retry(source):  # noqa: ANN001, ANN202
             if attempt == CHECK_ATTEMPTS:
                 raise
             delay = error.retry_after_s or wait_s
+            if delay > CHECK_MAX_WAIT_S:
+                raise RateLimitedError(delay) from error  # the server asks too long a wait: try later
             print(f"rate limited (HTTP 429), try {attempt + 1}/{CHECK_ATTEMPTS} in {delay:.0f} s")
             time.sleep(delay)
             wait_s *= 2
@@ -178,6 +203,16 @@ def _region(app: App, args: argparse.Namespace) -> int:
         all_places = regions.places(regions.fetch_tree(app.source()))
     except regions.RegionError as error:
         print(error)
+        return EXIT_UNCHANGED
+    except RateLimitedError as error:
+        wait = f"{error.retry_after_s:.0f} s" if error.retry_after_s else "a while"
+        print(f"The server limits the requests: try again in {wait}. The place did not change.")
+        return EXIT_UNCHANGED
+    except OSError as error:  # no network, a timeout, a server error
+        print(f"Cannot get the list of places: {error}. The place did not change.")
+        return EXIT_UNCHANGED
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:  # not a region tree
+        print(f"The list of places from the server is not usable: {error}. The place did not change.")
         return EXIT_UNCHANGED
     old = regions.current(app.raw["source"].get("vars", {}), all_places)
     print(f"Watched place now: {old.path if old else 'not set'}")
@@ -269,6 +304,8 @@ def _token(app: App, args: argparse.Namespace) -> int:
             print(f"The server refused the token ({error}). It is not saved.")
             return 1
         print(f"Not tested: the server does not answer ({error}). The token is saved anyway.")
+    except (ValueError, KeyError, TypeError, AttributeError) as error:  # an answer of another shape
+        print(f"Not tested: the answer of the server is not usable ({error}). The token is saved anyway.")
     finally:
         _restore_env(token.variable, previous)
     user_env.put(token.variable, value)
@@ -285,7 +322,7 @@ def _restore_env(name: str, previous: str | None) -> None:
 
 def _status(app: App, args: argparse.Namespace) -> int:
     sources = app.check_sources()
-    if sum(source is not None for _name, source, _why in sources) == 1:  # one source: the output as before
+    if sum(source is not None for _name, source, _why in sources) == 1:  # one configured source: show it directly
         status = app.source().fetch()
         print(status)
         print("scene:", app.policy().select(status))
@@ -306,7 +343,23 @@ def _status(app: App, args: argparse.Namespace) -> int:
     return 0 if any_ok else 1
 
 
+EXIT_APP_RUNS = 2  # devices / preview: the installed app runs and uses the SDKs
+
+
+def _refuse_while_the_app_runs(app: App, command: str) -> bool:
+    """A second SDK client beside the running app can hang the Aura SDK of the app
+    (its device scan then never ends). So these commands do not run beside it."""
+    if not stop_signal.running(app.stop_event_name()):
+        return False
+    print(f"{command}: the app runs and uses the lighting SDKs. A second SDK client can hang the "
+          "Aura SDK of the app. Stop the app first (AlertColors.exe stop), then start it again "
+          "with setup.cmd restart. For a preview while the app runs, use the configurator.")
+    return True
+
+
 def _devices(app: App, args: argparse.Namespace) -> int:
+    if _refuse_while_the_app_runs(app, "devices"):
+        return EXIT_APP_RUNS
     for backend in app.backends():
         print(f"{backend.name}:")
         try:
@@ -318,15 +371,18 @@ def _devices(app: App, args: argparse.Namespace) -> int:
 
 
 def _preview(app: App, args: argparse.Namespace) -> int:
-    # Same worker threads as `run`: the Aura SDK on the main thread blocks
-    # interpreter exit after the release (seen on 2026-11-08).
+    # Same worker threads as `run`: the Aura SDK on the main thread can block the
+    # interpreter exit after the release.
+    if _refuse_while_the_app_runs(app, "preview"):
+        return EXIT_APP_RUNS
     scene = app.scenes()[args.scene]
     if scene.release:
         print(f"scene {args.scene!r} only releases the LEDs: nothing to preview")
         return 1
     outputs = app.outputs()
     frame_s = app.settings().frame_interval_s
-    stop = _stop_event()
+    finished = threading.Event()  # set when the outputs released the LEDs
+    stop = _stop_event(finished)
     started = time.monotonic()
     try:
         while not stop.is_set() and (elapsed := time.monotonic() - started) < args.seconds:
@@ -337,4 +393,5 @@ def _preview(app: App, args: argparse.Namespace) -> int:
     finally:
         for output in outputs:
             output.close()  # close() releases the LEDs first
+        finished.set()
     return 0

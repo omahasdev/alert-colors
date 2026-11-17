@@ -12,7 +12,7 @@ These two files are in the project folder.
 
 | Script | What it does | Admin rights |
 |---|---|---|
-| `setup.cmd` | Shows a menu: install, update, restart, status, uninstall, build, configurator, watched place | Only for the install part (one UAC prompt) |
+| `setup.cmd` | Shows a menu: install, update, restart, status, uninstall, build, configurator, watched place, tokens | Only for the install part (one UAC prompt) |
 | `configure.cmd` | Opens the configurator of the installed app in the browser | No |
 
 ## `setup.cmd` actions
@@ -26,7 +26,7 @@ argument to run it without the menu: `setup.cmd status`.
 | 2 | `update` | Build, check the config, stop, copy the app and the config, update the entry and the task, start | After a code change or a new version |
 | 3 | `restart` | Check the config, stop, copy the config, start | After you edit the config |
 | 4 | `status` | Show the config in use, the process, the task, the Armoury Crate entry, the modules and the last log lines | At any time |
-| 5 | `uninstall` | Stop, remove the task, the Armoury Crate entry, the installed files and the tuning folder | To remove the app |
+| 5 | `uninstall` | Stop, remove the task, the Armoury Crate entry, the installed files, and the tuning folder with its old copies (a folder that another account owns is left, with a warning) | To remove the app |
 | 6 | `build` | Make `.venv`, run the tests, build `dist\AlertColors` | For development |
 | 7 | `tune` | Open the configurator (the same as `configure.cmd`) | To tune colors and effects |
 | 8 | `region` | Search the place, save it in the config of your PC (all place IDs for all sources), then restart the installed app | To watch a different place |
@@ -71,8 +71,8 @@ Without `--config`, the exe reads `config.toml` in the current folder.
 | `stop` | Ask the running app to release the LEDs and exit. Use this command, never a kill | 0: stop sent. 1: no app runs |
 | `check` | Load the config, build all parts, fetch each source one time, in the order of use. A source without a saved token, or without its place variable, is listed as not used. A config error or a refused token (HTTP 401, 403) in any source fails the check. A server that does not answer fails it only when no source gives a status | 0: OK. 1: an error |
 | `status` | Fetch the alert status one time, then print it and the scene. With more than one source, it does this for each source, in the order of use, and lists the sources that are not used | 0: fetched. Not 0: the fetch failed (with fallbacks: all sources failed) |
-| `devices` | List the devices of each enabled lighting backend. `[x]` marks the devices that the config includes | 0 |
-| `preview <scene> --seconds <n>` | Show one scene on the hardware for `n` seconds, then release the LEDs | 0. 1: the scene only releases the LEDs |
+| `devices` | List the devices of each enabled lighting backend. `[x]` marks the devices that the config includes. It does not run while the app runs | 0. 2: the app runs |
+| `preview <scene> --seconds <n>` | Show one scene on the hardware for `n` seconds, then release the LEDs. It does not run while the app runs | 0. 1: the scene only releases the LEDs. 2: the app runs |
 | `tune [--no-browser]` | Start the configurator on `127.0.0.1` and open it in the browser. `--no-browser` prints the URL only | 0 |
 | `region [--id <id>]` | Search the watched place by name and write its IDs and its oblast name into the `--config` file. The same place is written again when the config misses a variable of a newer version. `--id` sets the region ID without questions | 0: saved. 1: no place has this ID. 3: no change |
 | `token` | List the services with a token, then save, test or remove one token in the user environment. A token that the server refuses is not saved | 0: saved or removed. 1: refused. 3: no change |
@@ -85,7 +85,8 @@ Some commands have conditions:
 
 - `devices` and `preview` need admin rights for the motherboard and the ARGB headers.
 - `status` and `check` fetch the source. Some sources limit the rate for each IP address. While the app runs, these commands can get HTTP 429. `check` waits and tries again, up to 5 attempts.
-- `preview` and the running app write to the same LEDs. Run `stop` before `preview`, or use the preview in the configurator.
+- `devices` and `preview` do not run while the app runs. A second Aura SDK client beside the app can hang the device scan of the app, so that the Aura LEDs stop showing the alerts. Run `stop` first, then `setup.cmd restart` after the command, from a normal console (the setup does not run its Python steps with admin rights). For a preview while the app runs, use the configurator: it changes only the tuning file.
+- Another RGB program that uses the Aura SDK can cause the same hang. If the log of the app shows `scanning devices` with no `Aura control taken` after a few minutes, close that program, then run `setup.cmd restart`.
 - `region` changes only the file that `--config` names. To change the place of the installed app, use `setup.cmd region`.
 
 ## Developer commands

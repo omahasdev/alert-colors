@@ -1,9 +1,13 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 *.log
 *.log.*
 config.local.toml
 .venv/
 build/
 dist/
+
+# Local development notes, not part of the shipped product
+specs/

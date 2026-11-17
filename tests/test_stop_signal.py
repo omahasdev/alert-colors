@@ -26,7 +26,7 @@ def _restricted_event(name):
 
 
 def test_watch_opens_an_event_that_refuses_full_access():
-    name = f"Local\AlertColors.Test.{uuid.uuid4().hex}"
+    name = rf"Local\AlertColors.Test.{uuid.uuid4().hex}"
     owner = _restricted_event(name)  # noqa: F841  keep the event alive
     stop = threading.Event()
     handle = stop_signal.watch(name, stop)  # noqa: F841

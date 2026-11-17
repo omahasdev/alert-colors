@@ -25,7 +25,8 @@ sections 1 to 4 in this order. The other sections are for reference.
 
 You need:
 
-- Windows 10 or 11, and an account with admin rights (for one UAC prompt).
+- Windows 10 or 11 with UAC turned on (the default), and an account with admin rights,
+  or the password of an admin account for the UAC prompt (see step 8 of the install).
 - Internet access to the alert API (siren.pp.ua by default, no key). The first build also downloads packages from PyPI.
 - Approximately 150 MB of disk space: 75 MB for the build environment (`.venv`), 35 MB for the build, 25 MB for the installed app.
 - Python 3.14. If it is not installed, the setup offers to install it with `winget`.
@@ -35,7 +36,7 @@ You need:
   - **Razer devices:** Razer Synapse with the Chroma module. In Synapse, allow Chroma apps
     (the Chroma Connect or "Chroma Apps" setting). The app uses the Chroma SDK of Synapse on `localhost`.
 
-The first build takes approximately 2 to 5 min. Later builds take approximately 1 min.
+The first build downloads the packages and takes longer than the later builds.
 
 ## 2. Choose the modules
 
@@ -56,7 +57,7 @@ remove it as the table at the end of this section shows.
 
 | Module | What it is for | API key required | Smallest area |
 |---|---|---|---|
-| `siren_pp_ua` (default) | Ukrainian air-raid alerts from https://siren.pp.ua, a public mirror of the official ukrainealarm.com API. The fastest source without an API key: 1 to 3 s from a change to the LEDs | No | Community (hromada), with alert types |
+| `siren_pp_ua` (default) | Ukrainian air-raid alerts from https://siren.pp.ua, a public mirror of the official ukrainealarm.com API. The fastest source without an API key | No | Community (hromada), with alert types |
 | `ukrainealarm` | The same data from the official API https://api.ukrainealarm.com. Use it if you have an official API key (`UKRAINEALARM_API_KEY`) | Yes | Community, with alert types |
 | `alerts_in_ua` | Alerts from https://api.alerts.in.ua. Use it if you have a token from that service | Yes (a token) | Community, with alert types |
 | `ubilling` | Alerts from https://ubilling.net.ua/aerialalerts/. A fallback without an API key | No | Oblast only |
@@ -102,10 +103,18 @@ If Windows SmartScreen stops `setup.cmd`, click **More info**, then **Run anyway
 5. If this PC has no config yet, the setup shows "Watched place now". Type a part of the name of your
    city, community, district or oblast. Ukrainian and Latin letters both work.
 6. Type the number of your place in the list. To keep the test region, press Enter instead.
-7. Wait for `CHECK OK`. The setup fetches the alert status one time with your config.
-   If the check fails, the setup installs nothing and shows the cause.
+7. Wait for `CHECK OK`. The setup stops the running app, then fetches the alert status one time
+   with your config. If the check fails, the setup installs nothing, starts the old app again
+   and shows the cause.
 8. Accept the UAC prompt. A second console window does the admin part. It copies the app to
    `C:\Program Files\AlertColors`, adds the Armoury Crate entry and the autostart task, and starts the app.
+   The autostart task and the write rights on the tuning folder are for the account that started
+   `setup.cmd`, also when another admin account approves the UAC prompt. If that account has no
+   admin rights, the app runs without them: `aura_sdk` then sees only some devices, and the
+   log goes to `%LOCALAPPDATA%\AlertColors\alert-colors.log` of that account (`setup.cmd status`
+   shows only the log in `C:\Program Files\AlertColors`).
+   If you cancel the UAC prompt, or a step of the admin part fails, the setup starts the
+   installed app again.
 9. In each of the two console windows, press Enter to close it.
 10. If you use `aura_sdk`, do the Armoury Crate steps below.
 
@@ -113,7 +122,7 @@ The Armoury Crate steps (one time):
 
 1. Open **Armoury Crate**, then open **Aura Sync**.
 2. Make sure that **In-Game lighting effects** is on.
-3. Open the in-game lighting priority list. It can need approximately 1 min to load, because
+3. Open the in-game lighting priority list. It can be slow to load, because
    Armoury Crate first reads all the apps of its Game Library.
 4. Move **AlertColors.exe** ("Air Alert Colors") to the top.
 
@@ -124,8 +133,8 @@ the PC LEDs do not show the alert status. Look at the list again after an
 Armoury Crate update.
 
 Note: After the install, and after each start of the app, the PC LEDs (ASUS
-Aura) can need approximately 30 s before they change. The first device scan of
-the ASUS SDK takes this time. The Razer devices change at once.
+Aura) change only after the first device scan of the ASUS SDK, which is slow.
+The log then shows `Aura control taken`. The Razer devices change at once.
 
 **Make sure that the app works:**
 
@@ -194,7 +203,7 @@ actions, their options and the command line of the exe.
 | 2 | Update | Build the current source, check, stop, copy, start | After you get a new version of the project |
 | 3 | Restart | Check the config, stop, copy the config, start | After you edit the config |
 | 4 | Status | Config in use, process, autostart task, Armoury Crate entry, modules, last log lines | At any time |
-| 5 | Uninstall | Stop, remove the autostart task, the Armoury Crate entry, the installed files and the tuning folder | To remove the app |
+| 5 | Uninstall | Stop, remove the autostart task, the Armoury Crate entry, the installed files, and the tuning folder with its old copies (a folder that another account owns is left, with a warning) | To remove the app |
 | 6 | Build | Build only | For development |
 | 7 | Configurator | Open the configurator (the same as `configure.cmd`) | To tune colors and effects |
 | 8 | Watched place | Search the place, save it in the config of your PC, apply it | To watch a different place |
@@ -253,7 +262,7 @@ each source. For any other JSON API, use `type = "json_http"`
 | Setting | Meaning |
 |---|---|
 | `poll_interval_s` | Wait after each successful fetch |
-| `backoff_max_s` | After errors (for example HTTP 429), the wait doubles up to this value. The server's `Retry-After` is obeyed. |
+| `backoff_max_s` | After errors (for example HTTP 429), the wait doubles up to this value. The server's `Retry-After` is obeyed, for at most 3600 s. |
 | `stale_after_s` | Older data shows the `unknown` scene, never `clear` |
 | `[source.vars]` | Values for `${name}` placeholders. `${env:NAME}` reads an environment variable, for tokens. |
 | `[source.request]` | `url`, `method`, `headers`, `params`, `body`, `timeout_s`, and the network limits (see Security) |
@@ -269,7 +278,7 @@ its district and oblast, so the city lights up for a district alert too.
 
 Freshness without a key: siren.pp.ua caches for 1 s and allows approximately
 1 request per second for each IP. With `poll_interval_s = 1`, an update shows
-after 1–3 s; approximately one poll in 15 s gets HTTP 429 and waits 2 s. With
+after a few polls; a poll that the server rate-limits (HTTP 429) waits and tries again. With
 an official key, switch to `ukrainealarm` (same API, the key in
 `UKRAINEALARM_API_KEY`; request form on https://api.ukrainealarm.com).
 
@@ -318,14 +327,14 @@ device with one color (the mouse) shows the first position.
 | `solid` | Static | | `color`, `brightness` |
 | `pulse` | Breathing | | `color`, `period_s`, `min_brightness`, `max_brightness` |
 | `blink` | Blink | | `color`, `period_s`, `duty`, `brightness`, `off_color` |
-| `strobe` | Strobing / Flashing | | `color`, `period_s`, `flashes`, `flash_s`, `brightness`, `off_color` |
+| `strobe` | Strobing | | `color`, `period_s`, `flashes`, `flash_s`, `brightness`, `off_color` |
 | `color_cycle` | Color cycle / Spectrum cycling | | `colors` (empty: spectrum), `period_s`, `saturation`, `brightness`, `smooth` |
 | `rainbow` | Rainbow / Rainbow wave | yes | `period_s`, `repeats`, `direction`, `saturation`, `brightness`, `moving` |
 | `gradient` | Gradient / Color wave | yes | `colors`, `period_s`, `repeats`, `direction`, `brightness`, `moving` |
 | `wave` | Wave | yes | `color`, `background`, `period_s`, `repeats`, `direction`, `min_brightness`, `max_brightness` |
 | `comet` | Comet / Flash and dash | yes | `color`, `background`, `period_s`, `tail`, `direction` |
 | `scanner` | Scanner / Glowing yoyo | yes | `color`, `background`, `period_s`, `tail` |
-| `twinkle` | Starry night / Starlight | yes | `colors`, `background`, `density`, `period_s`, `brightness`, `seed` |
+| `twinkle` | Starry night / Twinkle | yes | `colors`, `background`, `density`, `period_s`, `brightness`, `seed` |
 | `marquee` | Marquee / Theater chase | yes | `color`, `background`, `spacing`, `lit`, `period_s`, `direction` |
 | `fire` | Fire | yes | `colors` (cold to hot), `speed`, `flicker`, `brightness`, `seed` |
 
@@ -358,6 +367,12 @@ keep the network and the files from becoming a way to attack this PC:
   replace the exe, a DLL or the config of the running app.
 - **No elevated code from the project.** The build (pip, tests, PyInstaller)
   runs with normal rights. The elevated part of `setup.cmd` is PowerShell only.
+  If you start `setup.cmd` with admin rights, the steps that run Python (build,
+  config check, place picker, token tool) stop with a message: start it again
+  from a normal console. The setup needs UAC turned on (the default of Windows)
+  and an account that is not the built-in Administrator: with UAC turned off, a
+  standard account gets no admin rights for the copy, and an admin account
+  always has them.
   `manage.ps1` itself runs elevated from the project folder, as any installer
   does: keep the project in a folder that only your account controls.
 - **Network.** The API client allows only `https`, follows no redirects,
@@ -375,6 +390,45 @@ keep the network and the files from becoming a way to attack this PC:
   `requirements-build.txt`.
 - **Secrets.** Tokens come from environment variables (`${env:NAME}`), never
   from `config.toml`.
+- **The environment of your account.** The task runs the app as admin, but with
+  the environment of your account, which programs without admin rights can
+  change. So the app removes the OpenSSL variables (`OPENSSL_CONF`,
+  `SSL_CERT_FILE` and others) at start, loads DLLs only from its own folder, the
+  Windows system folder and the Aura SDK folder (never from `PATH`), trusts only
+  root certificates of the machine stores, and takes `Program Files`,
+  `ProgramData` and the Windows folder (`SystemRoot`, `windir`) from Windows, not
+  from environment variables. A proxy is used
+  only for `https` to a remote or LAN server: there it sees only the encrypted data.
+- **Tuning file.** Your account can write it, so it can change only the look:
+  colors, brightness and a preview. Thus a program of your account can also
+  change what each alert state looks like. A preview ends 120 s after the app
+  reads a changed file, or after the app starts.
+- **Tuning folder.** The setup holds `C:\ProgramData\AlertColors` open while it sets
+  its rights, so no program can swap it. If Administrators do not own the folder
+  (also when your account made it, for example with the configurator), the
+  setup moves it aside (`AlertColors.old-...`) and makes a new one. It copies the
+  `tuning.json` of the old folder only when the folder and the file belong to your
+  account, and only a plain file of at most 256 KiB. It refuses a folder with a
+  subfolder or a link, and then names what to delete: this check runs before the
+  setup changes the installed files, and the setup then starts the old app again.
+  It writes each file in the folder again, so that the file belongs to
+  Administrators and has only the folder's rights. A file of another account in the
+  folder is deleted, or renamed aside when it cannot be deleted. If a program holds the folder
+  or a file open, close it (for example the configurator), then run the setup
+  again. If this step fails, the setup still registers and starts the app, and
+  then reports the error. The app reads a tuning file only from a folder that
+  Administrators, SYSTEM or TrustedInstaller own and that is not a link, and only a
+  file of these owners or of your account: until the next successful setup, it then uses the look of the
+  config.
+- **Before the UAC prompt.** The elevated part of `setup.cmd` copies the build
+  (`dist\`) and your config (`%APPDATA%\AlertColors\config.toml`), which your
+  account can change. A program without admin rights could change them, or put a
+  link in their place, before you accept the prompt and until the copy ends, as
+  with any installer that builds without admin rights.
+  The same is true for `scripts\manage.ps1` itself and for the environment of
+  your account, which the elevated PowerShell starts with (for example the
+  variables that .NET reads at its start). Accept the prompt only when you
+  started the setup, and keep the PC free of malware.
 
 ## Stop: never kill the app
 
@@ -400,11 +454,11 @@ The first change makes the backup `ProcessList.ini.alert-colors.bak`.
 
 | Problem | What to do |
 |---|---|
-| The PC LEDs do not change | Wait 30 s after a start. Make sure that **AlertColors.exe** is at the top of the Armoury Crate priority list, and that **In-Game lighting effects** is on. |
+| The PC LEDs do not change | After a start, wait for `Aura control taken` in the log. Make sure that **AlertColors.exe** is at the top of the Armoury Crate priority list, and that **In-Game lighting effects** is on. |
 | Armoury Crate does not find its devices | The app was killed (see [Stop](#stop-never-kill-the-app)). Run `Restart-Service LightingService -Force` in an admin PowerShell, then restart Armoury Crate. |
 | The Razer devices do not change | Make sure that Synapse runs and that Chroma apps are allowed in Synapse. The log shows `backend razer_chroma failed` with the cause. |
 | The LEDs breathe purple (`unknown`) | The app has no fresh data. Make sure that the PC has internet access, then look at the log for the error. If the log shows that every source fails, wait: the app goes back to the normal colors at the first success. See [the order of the sources](SOURCES.md#the-order-of-the-sources). |
-| The log shows HTTP 429 | The API limits the request rate. The app waits and tries again: with siren.pp.ua, approximately one poll in 15 s gets 429. Do not run two copies of the app. |
+| The log shows HTTP 429 | The API limits the request rate. The app waits and tries again. siren.pp.ua allows about one request per second for each IP. Do not run two copies of the app. |
 | `CHECK FAILED` in the setup | The console shows the cause. The old app runs unchanged. Correct the config, then run the action again. |
 | An error every 30 s for a module that you do not use | Set `enabled = false` in its `[[lighting]]` entry, or build without it (see [Choose the modules](#2-choose-the-modules)). |
 | The PC LEDs show the Armoury Crate effect after the display turns on | The app takes them again within 5 s. If it does not, look for `display on or resume` in the log. Without that line, the app gets no power events: restart it with `setup.cmd restart`. |
@@ -431,6 +485,9 @@ set PYTHONPATH=src
 ```
 
 `devices` and `preview` need admin rights for the motherboard and ARGB headers.
+While the installed app runs, they do not start and exit with code 2: a second
+Aura SDK client can hang the device scan of the app. Stop the app first
+(`AlertColors.exe stop`), then start it again with `setup.cmd restart`.
 
 **Update the pins.** Change a version in `requirements-build.txt`. Then
 download the wheels (`pip download --no-deps --only-binary :all: <name>==<version>`),
@@ -442,31 +499,31 @@ These facts come from tests with Armoury Crate, Razer Synapse and the alert
 APIs. They explain the values of some settings.
 
 - The Aura SDK enumerates 0 devices in a single-threaded COM apartment. The backend uses MTA.
-- The first Aura `Enumerate()` in a process takes ~30 s with admin rights. Later calls take ~0 s.
+- The first Aura `Enumerate()` in a process with admin rights is slow: it scans all
+  devices. Later calls are fast. So the backend keeps the SDK object.
 - The Aura SDK on the main thread blocks interpreter exit after a release. All
   commands use one worker thread for each backend.
-- One Aura apply of all LEDs takes less than 0.1 s, so `frame_interval_s = 0.1`.
+- One Aura apply of all LEDs is fast enough for `frame_interval_s = 0.1`.
 - `SwitchMode()` asks the SDK for the control token; the SDK compares the
   priority of the exe with the current holder. `ReleaseControl(0)` gives it
   back, and the SDK restores the Armoury Crate profile.
 - Armoury Crate "Breathing" runs in the controller hardware: it continues
   until the app writes colors.
 - Each time the display turns on, the ASUS service takes the Aura token back
-  (`WM_POWERBROADCAST`, `PBT_POWERSETTINGCHANGE`). It took the token 0.2 s after
-  the event, and applied its own profile to the devices 12 s after the event.
+  (`WM_POWERBROADCAST`, `PBT_POWERSETTINGCHANGE`). It takes the token soon after
+  the event, but can apply its own profile to the devices only some seconds later.
   The SDK in the app gets no error: its colors only stop showing. "Display off"
   does not take the token.
-- At logon, `ArmouryCrate.exe` can start more than 60 s after the app, when
+- At logon, `ArmouryCrate.exe` can start long after the app, when
   the startup window has ended. Armoury Crate then loads its own profile, and
   the LEDs show it until the next interval reclaim. Thus the app also watches
   vendor process starts.
-- One `SwitchMode()` adds approximately 14 lines (1.5 KB) to `AuraSDK.log`,
-  which the ASUS service does not rotate, and approximately 43 lines to
-  `LightingService.log`, which it rotates. So `reclaim_interval_s` is 300 s, not less.
-- ubilling answers HTTP 429 when polled too fast (twice in 17 min at 1 s).
+- Each `SwitchMode()` adds lines to `AuraSDK.log`, which the ASUS service does
+  not rotate, and to `LightingService.log`, which it rotates. So `reclaim_interval_s` is 300 s, not less.
+- ubilling answers HTTP 429 when it is polled too fast (for example each second).
 - siren.pp.ua allows approximately 1 request per second for each IP; the
-  global `lastActionIndex` changed approximately every 7 s.
-- A release of the Aura SDK can need 44 s in the ASUS service: the worker waits
+  global `lastActionIndex` changes every few seconds.
+- A release of the Aura SDK can need tens of seconds in the ASUS service: the worker waits
   up to `backend_close_timeout_s` (90 s), and `setup.cmd` up to 120 s.
 - The Chroma SDK sometimes refuses the first requests of a new session. The
   worker releases, waits `backend_retry_s`, and opens a new session.

@@ -88,10 +88,15 @@ If the server refuses a saved token later, the app logs `the server refused
 the token`, uses the next source at once, and tries again after
 `retry_max_s`. Save the token again with `setup.cmd token`.
 
+If this PC has no network (the host names do not resolve), the app does not
+double the skip times. It tries again at most `offline_retry_s` (3 s) later, and the
+data comes back soon after the network does. See
+[No network](CONFIG.md#no-network).
+
 ## `siren_pp_ua`
 
 A public mirror of the official ukrainealarm.com API at https://siren.pp.ua.
-It is the fastest source without a token: 1 to 3 s from a change to the LEDs.
+It is the fastest source without a token.
 
 - **Token:** not necessary.
 - **Limit:** approximately 1 request per second for each IP address. A second

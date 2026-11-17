@@ -1,6 +1,6 @@
 """Run each lighting backend on its own thread.
 
-Why: vendor SDKs block. The Aura SDK needs ~30 s for its first device scan, and a
+Why: vendor SDKs block. The first device scan of the Aura SDK is slow, and a
 REST call can hang until its timeout. The render loop only posts the newest
 color to a mailbox, so a slow or broken backend never delays the others.
 A COM backend also gets a fresh thread, where it can choose its own apartment.
@@ -15,9 +15,9 @@ from typing import Protocol
 
 from .domain import FULL_BRIGHTNESS
 from .frame import Frame
+from .lighting import LightingBackend
 
 NO_CORRECTION = (FULL_BRIGHTNESS, FULL_BRIGHTNESS, FULL_BRIGHTNESS)
-from .lighting import LightingBackend
 
 log = logging.getLogger(__name__)
 

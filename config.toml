@@ -16,6 +16,7 @@
 type = "siren_pp_ua"          # the fastest source without a key (checked 2026-11-08)
 poll_interval_s = 1           # each poll fetches only lastActionIndex (38 bytes); the mirror caches 1 s
 backoff_max_s = 60            # after errors (for example HTTP 429), wait up to this long
+offline_retry_s = 3           # this PC has no network (DNS fails): try again this soon; 0: use the backoff
 stale_after_s = 180           # older data shows the "unknown" scene, never "clear"
 
 # The watched place. The default is the test region of the API: choose your
@@ -47,6 +48,8 @@ oblast_name = ""              # the oblast name: for ubilling, and for "partial"
 #   or at once when its server refused the token.
 # - After a failure, a source is skipped for retry_s, doubled each time up to
 #   retry_max_s. So the app tries the first source again, and goes back to it.
+# - No network on this PC (the host names do not resolve): no doubling. The app
+#   tries again every [source] offline_retry_s (docs/CONFIG.md, "No network").
 [failover]
 after_s = 30                  # must be less than stale_after_s, or the LEDs show "unknown" first
 retry_s = 10                  # less than after_s: one timeout of [source] does not switch
@@ -187,17 +190,17 @@ max_brightness = 1.0
 # =============================================================== display ====
 [display]
 brightness = 1.0              # global factor for every color
-frame_interval_s = 0.1        # one Aura apply of all LEDs takes less than 0.1 s
+frame_interval_s = 0.1        # one Aura apply of all LEDs is fast enough for this
 backend_retry_s = 30          # after a backend error, wait this long before retry
 backend_close_timeout_s = 90  # on exit, wait this long for each backend to release;
-                              # the ASUS service needed 44 s for one release (2026-11-08)
+                              # the ASUS service can need tens of seconds for one release
 # A vendor app can take the LEDs back without a message to the app: the ASUS
 # service does it each time the display turns on. The app then takes them again.
 reclaim_after_wake_s = 60     # after the display turns on or the PC resumes, for this long ...
 reclaim_step_s = 5            # ... take the LEDs again this often
 reclaim_interval_s = 300      # and also this often at any time; 0 = never by time
 # A vendor app also takes the LEDs back when it starts: at logon, Armoury Crate
-# can start more than 60 s after the app. A new process with one of these names starts
+# can start long after the app. A new process with one of these names starts
 # the same reclaim window as "display on". [] = do not watch.
 vendor_processes = ["ArmouryCrate.exe", "LightingService.exe", "AacAmbientLighting.exe"]
 vendor_poll_s = 2             # read the process list this often

@@ -4,6 +4,7 @@ knows how the parts connect."""
 from __future__ import annotations
 
 import logging
+import os
 import logging.handlers
 import sys
 import tomllib
@@ -26,7 +27,7 @@ from .sources.preset import TOKENS, NotConfiguredError
 DEFAULT_CONFIG = Path("config.toml")
 # Take the LEDs again (see power_events.py): for a config without these keys.
 DEFAULT_RECLAIM_INTERVAL_S = 300.0  # a fallback for takeovers without a wake event
-DEFAULT_RECLAIM_AFTER_WAKE_S = 60.0  # the ASUS service applied its profile 12 s after the event
+DEFAULT_RECLAIM_AFTER_WAKE_S = 60.0  # the ASUS service can apply its profile some seconds after the event
 DEFAULT_RECLAIM_STEP_S = 5.0
 # A new process with one of these names takes the LEDs back (see process_events.py).
 DEFAULT_VENDOR_PROCESSES = ("ArmouryCrate.exe", "LightingService.exe", "AacAmbientLighting.exe")
@@ -35,6 +36,7 @@ DEFAULT_VENDOR_POLL_S = 2.0
 DEFAULT_FAILOVER_AFTER_S = 30.0  # well below stale_after_s: the LEDs never show "unknown" first
 DEFAULT_FAILOVER_RETRY_S = 10.0  # below after_s: one timeout of the primary does not switch
 DEFAULT_FAILOVER_RETRY_MAX_S = 120.0
+DEFAULT_OFFLINE_RETRY_S = 3.0  # no network: a retry sends nothing to a server (specs/001-offline-recovery)
 DEFAULT_FALLBACK_POLL_S = 10.0
 # Without [[failover.token_sources]]: the city-level services that need a token,
 # best first. Each one is used only after `setup.cmd token` saves its token.
@@ -166,7 +168,7 @@ class App:
                 continue
             members.append(Member(source, poll_interval_s=poll_interval_s))
         if len(members) == 1:
-            return members[0].source  # no [failover]: the same as before
+            return members[0].source  # no [failover] section: use the single source directly
         failover = self.raw.get("failover", {})
         return FailoverSource(
             primary=members[0],
@@ -174,7 +176,12 @@ class App:
             after_s=float(failover.get("after_s", DEFAULT_FAILOVER_AFTER_S)),
             retry_s=float(failover.get("retry_s", DEFAULT_FAILOVER_RETRY_S)),
             retry_max_s=float(failover.get("retry_max_s", DEFAULT_FAILOVER_RETRY_MAX_S)),
+            offline_retry_s=self.offline_retry_s(),
         )
+
+    def offline_retry_s(self) -> float:
+        """[source] offline_retry_s: the retry when this PC has no network; 0 (or less): off."""
+        return max(0.0, float(self.raw["source"].get("offline_retry_s", DEFAULT_OFFLINE_RETRY_S)))
 
     def scenes(self) -> dict[str, Scene]:
         return build_scenes(self.raw["scenes"])
@@ -203,7 +210,6 @@ class App:
     def settings(self) -> DaemonSettings:
         source, display = self.raw["source"], self.raw["display"]
         after_s = float(self.raw.get("failover", {}).get("after_s", DEFAULT_FAILOVER_AFTER_S))
-        failover = self.raw.get("failover", {})
         if len(self.source_chain()) > 1 and after_s >= float(source["stale_after_s"]):
             raise ValueError(f"[failover] after_s ({after_s}) must be less than "
                              f"[source] stale_after_s ({source['stale_after_s']}), "
@@ -213,6 +219,7 @@ class App:
             stale_after_s=float(source["stale_after_s"]),
             frame_interval_s=float(display["frame_interval_s"]),
             backoff_max_s=float(source.get("backoff_max_s", source["poll_interval_s"])),
+            offline_retry_s=self.offline_retry_s(),
             brightness=float(display.get("brightness", FULL_BRIGHTNESS)),
             reclaim_interval_s=float(display.get("reclaim_interval_s", DEFAULT_RECLAIM_INTERVAL_S)),
             reclaim_after_wake_s=float(display.get("reclaim_after_wake_s", DEFAULT_RECLAIM_AFTER_WAKE_S)),
@@ -286,21 +293,50 @@ class App:
         handlers: list[logging.Handler] = []
         if sys.stderr is not None:  # None under pythonw.exe
             handlers.append(logging.StreamHandler())
+        file_error, fallback = None, None
+
+        def file_handler(path: Path) -> logging.Handler:
+            return logging.handlers.RotatingFileHandler(
+                path, maxBytes=int(section["max_bytes"]), backupCount=int(section["backups"]), encoding="utf-8")
+
         if to_file and (file_name := section.get("file")):
-            handlers.append(
-                logging.handlers.RotatingFileHandler(
-                    self.log_path(file_name),
-                    maxBytes=int(section["max_bytes"]),
-                    backupCount=int(section["backups"]),
-                    encoding="utf-8",
-                )
-            )
+            try:
+                handlers.append(file_handler(self.log_path(file_name)))
+            except OSError as error:  # for example a standard user: the folder is in Program Files
+                file_error = error
+                fallback = user_log_path(file_name)
+                if fallback is not None:
+                    try:
+                        fallback.parent.mkdir(parents=True, exist_ok=True)
+                        handlers.append(file_handler(fallback))
+                    except OSError:
+                        fallback = None
         logging.basicConfig(
             level=section["level"],
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
             handlers=handlers,
             force=True,
         )
+        if file_error is not None:  # the app runs on: a log file is not worth an alert
+            where = f"the log goes to {fallback}" if fallback else "the log goes only to the console"
+            logging.getLogger(__name__).warning("no log file (%s): %s", file_error, where)
+
+
+USER_LOG_FOLDER = "AlertColors"  # under %LOCALAPPDATA%
+
+
+def user_log_path(file_name: str) -> Path | None:
+    """The log file in %LOCALAPPDATA%, for a process without admin rights only.
+
+    An admin process never writes to a folder that the user controls: a link there
+    could point the writes to another file.
+    """
+    import ctypes
+
+    local = os.environ.get("LOCALAPPDATA")
+    if sys.platform != "win32" or not local or ctypes.windll.shell32.IsUserAnAdmin():
+        return None
+    return Path(local) / USER_LOG_FOLDER / Path(file_name).name
 
 
 RGB_CHANNELS = 3

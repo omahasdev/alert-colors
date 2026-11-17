@@ -38,7 +38,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -46,7 +46,7 @@ import jmespath
 
 from ..domain import AlertStatus, Coverage
 from ..http import DEFAULT_MAX_RESPONSE_BYTES, NetworkPolicy, request_json
-from ..template import expand
+from ..template import expand, expand_jmespath
 from .base import SOURCES
 
 ISO = "iso"
@@ -155,7 +155,7 @@ class JsonHttpSource:
             self._compile_fields()
 
     def _compile_fields(self) -> None:
-        self.fields = {name: jmespath.compile(expand(expr, self.variables))
+        self.fields = {name: jmespath.compile(expand_jmespath(expr, self.variables))
                        for name, expr in self.raw_fields.items()}
 
     def provide_lookup(self, name: str, value: Any) -> None:
@@ -164,7 +164,14 @@ class JsonHttpSource:
             raise FieldError(f"lookup {name!r} gave no value")
         self.variables[name] = json.dumps(value, ensure_ascii=False)
         if all(lookup_name in self.variables for lookup_name in self.lookups):
-            self._compile_fields()
+            try:
+                self._compile_fields()
+            except ValueError as error:
+                # A value that cannot go into the expressions: forget it, so that the
+                # next fetch asks for the lookup again and the source can recover.
+                del self.variables[name]
+                self.fields = {}
+                raise FieldError(f"lookup {name!r}: {error}") from error
 
     def fetch_lookup_document(self, name: str) -> Any:
         """The full JSON of a lookup request, before its expression."""
@@ -186,8 +193,14 @@ class JsonHttpSource:
         now = self.monotonic()
         fresh = now - self._last_full_at < self.marker.max_age_s
         if value == self._last_marker and self._last_status is not None and fresh:
-            # Nothing changed since the full request: the old status is current.
-            return replace(self._last_status, observed_at=None)
+            # Nothing changed since the full request: the old status is current, with the
+            # age that it had then. Data that was too old stays too old, and fresh data
+            # stays fresh between two full requests.
+            status = self._last_status
+            if status.observed_at is not None:
+                status = replace(status, observed_at=status.observed_at
+                                 + timedelta(seconds=now - self._last_full_at))
+            return status
         status = self.parse(_get(self.request, self.network))
         self._last_marker, self._last_status, self._last_full_at = value, status, now
         return status
@@ -222,16 +235,18 @@ def create_json_http(options: dict[str, Any]) -> JsonHttpSource:
         raise ValueError("json_http: [source.fields] needs a `full` expression")
     lookups = {}
     for lookup_name, raw_lookup in options.get("lookups", {}).items():
-        raw_lookup = expand(raw_lookup, variables)
-        lookup_request = {**request, **{k: v for k, v in raw_lookup.items() if k != "expression"}}
-        lookups[lookup_name] = Lookup(lookup_request, jmespath.compile(raw_lookup["expression"]))
+        lookup_request = {**request, **expand({k: v for k, v in raw_lookup.items() if k != "expression"}, variables)}
+        expression = jmespath.compile(expand_jmespath(raw_lookup["expression"], variables))
+        lookups[lookup_name] = Lookup(lookup_request, expression)
     kinds = options.get("kinds", {})
     times = options.get("time", {})
     marker = None
     if "change_marker" in options:
-        raw = expand(options["change_marker"], variables)
-        marker_request = {**request, **{k: v for k, v in raw.items() if k not in ("field", "max_age_s")}}
-        marker = ChangeMarker(marker_request, jmespath.compile(raw["field"]), float(raw["max_age_s"]))
+        raw = options["change_marker"]
+        marker_request = {**request, **expand({k: v for k, v in raw.items() if k not in ("field", "max_age_s")},
+                                              variables)}
+        marker = ChangeMarker(marker_request, jmespath.compile(expand_jmespath(raw["field"], variables)),
+                              float(raw["max_age_s"]))
     return JsonHttpSource(
         request=request,
         raw_fields=dict(options["fields"]),

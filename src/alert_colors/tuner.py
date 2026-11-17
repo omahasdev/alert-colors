@@ -26,11 +26,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from typing import Any
 
-from .config import App
+from .config import App, user_log_path
 from .domain import FULL_BRIGHTNESS
 from .outputs import NO_CORRECTION
 from .effects import schema
-from .tuning import TuningError, parse, read_file, write_file
+from .tuning import PREVIEW_DEFAULT_S, PREVIEW_MAX_S, PREVIEW_MIN_S, TuningError, parse, read_file, write_file
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,6 @@ ANY_FREE_PORT = 0
 TOKEN_BYTES = 24
 MAX_BODY_BYTES = 262_144
 IDLE_EXIT_S = 1800  # the tuner exits after 30 min without requests
-PREVIEW_MIN_S, PREVIEW_DEFAULT_S, PREVIEW_MAX_S = 1.0, 10.0, 120.0
 SCENE_LINE = re.compile(r"scene (\S+) -> (\S+)")
 LOG_TAIL_BYTES = 65_536
 
@@ -63,16 +62,24 @@ class Tuner:
     # ---- state --------------------------------------------------------------
     def _document(self) -> dict[str, Any]:
         try:
-            return read_file(self.path) if self.path.exists() else {}
+            document = read_file(self.path) if self.path.exists() else {}
         except (OSError, ValueError):
             return {}
+        return document if isinstance(document, dict) else {}  # valid JSON, but not a tuning file
 
     def _current_scene(self) -> str | None:
         file_name = self.app.raw.get("logging", {}).get("file")
         if not file_name:
             return None
-        try:
-            with self.app.log_path(file_name).open("rb") as f:
+        # The app of a standard user cannot write the log in Program Files: it uses
+        # the user log folder (config.user_log_path), and the newer file is the right one.
+        candidates = [path for path in (self.app.log_path(file_name), user_log_path(file_name)) if path]
+        try:  # a log rotation can remove a file between these calls
+            existing = [path for path in candidates if path.exists()]
+            if not existing:
+                return None
+            newest = max(existing, key=lambda path: path.stat().st_mtime)
+            with newest.open("rb") as f:
                 f.seek(0, 2)
                 f.seek(max(0, f.tell() - LOG_TAIL_BYTES))
                 tail = f.read().decode("utf-8", errors="replace")
@@ -82,6 +89,8 @@ class Tuner:
         return matches[-1][1] if matches else None
 
     def state(self) -> dict[str, Any]:
+        """The data of the page. A tuning file with wrong parts still gives a page: the
+        configurator is the tool that repairs it."""
         document = self._document()
         try:
             tuning = parse(document, self.base_scenes, self.backend_types)
@@ -91,7 +100,7 @@ class Tuner:
         lighting = {}
         for entry in self.app.raw.get("lighting", []):
             if entry.get("enabled", True):
-                tuned = document.get("lighting", {}).get(entry["type"], {})
+                tuned = _section(_section(document, "lighting"), entry["type"])
                 lighting[entry["type"]] = {
                     "brightness": tuned.get("brightness", entry.get("brightness", FULL_BRIGHTNESS)),
                     "color_correction": tuned.get("color_correction",
@@ -105,7 +114,7 @@ class Tuner:
             "scenes": options,
             "base_scenes": self.base_scenes,
             "used_by": used_by,
-            "brightness": document.get("display", {}).get(
+            "brightness": _section(document, "display").get(
                 "brightness", self.app.raw.get("display", {}).get("brightness", FULL_BRIGHTNESS)),
             "lighting": lighting,
             "tuning_file": str(self.path),
@@ -183,7 +192,13 @@ class Tuner:
                 if not self._allowed():
                     self._json(HTTPStatus.FORBIDDEN, {"ok": False, "message": "forbidden"})
                     return
-                length = int(self.headers.get("Content-Length") or 0)
+                try:
+                    length: int | None = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = None
+                if length is None or length < 0:  # rfile.read(-1) would wait for the client to close
+                    self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "bad Content-Length"})
+                    return
                 if length > MAX_BODY_BYTES:
                     self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "message": "too large"})
                     return
@@ -201,7 +216,8 @@ class Tuner:
                         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "unknown action"})
                         return
                     self._json(HTTPStatus.OK, result)
-                except (TuningError, ValueError, KeyError, TypeError, OSError) as error:
+                except (TuningError, ValueError, KeyError, TypeError, AttributeError, RecursionError,
+                        OverflowError, OSError) as error:
                     self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(error)})
 
         server = ThreadingHTTPServer((HOST, ANY_FREE_PORT), Handler)
@@ -222,3 +238,9 @@ class Tuner:
         if open_browser:
             webbrowser.open(url)
         server.serve_forever()
+
+
+def _section(document: Any, key: str) -> dict[str, Any]:
+    """document[key] when it is an object, else an empty one."""
+    value = document.get(key, {}) if isinstance(document, dict) else {}
+    return value if isinstance(value, dict) else {}

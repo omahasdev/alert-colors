@@ -1,8 +1,8 @@
 """Windows power events: the display turns on, or the PC resumes from sleep.
 
 Why: the ASUS lighting service takes the LEDs back when the display turns on.
-The service gets WM_POWERBROADCAST (PBT_POWERSETTINGCHANGE), and 0.2 s later
-it takes the Aura token and loads its own profile. The app gets no message about this, so it listens to the same
+The service gets WM_POWERBROADCAST (PBT_POWERSETTINGCHANGE), and soon after it
+takes the Aura token and loads its own profile. The app gets no message about this, so it listens to the same
 events and takes the LEDs again (Daemon.request_reclaim).
 
 A hidden top-level window gets the events. A message-only window would miss
@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 
 WM_POWERBROADCAST = 0x0218
 WM_CLOSE = 0x0010
+WM_QUERYENDSESSION = 0x0011
+WM_ENDSESSION = 0x0016
 PBT_APMRESUMESUSPEND = 0x0007
 PBT_APMRESUMEAUTOMATIC = 0x0012
 PBT_POWERSETTINGCHANGE = 0x8013
@@ -64,8 +66,9 @@ def is_wake(event: int, setting_address: int) -> bool:
 class PowerWatcher:
     """Calls `on_wake()` on its own thread when the display turns on or the PC resumes."""
 
-    def __init__(self, on_wake: Callable[[], None]) -> None:
+    def __init__(self, on_wake: Callable[[], None], on_end_session: Callable[[], None] | None = None) -> None:
         self._on_wake = on_wake
+        self._end_session_callback = on_end_session
         self._started = threading.Event()
         self.hwnd: int | None = None
         self._thread = threading.Thread(target=self._run, name="power-events", daemon=True)
@@ -74,10 +77,14 @@ class PowerWatcher:
             log.warning("power events: the window did not start within %ss", STARTUP_TIMEOUT_S)
 
     def stop(self) -> None:
-        if self.hwnd is not None:
+        if self.hwnd is not None and self._thread.is_alive():
+            import pywintypes
             import win32gui
 
-            win32gui.PostMessage(self.hwnd, WM_CLOSE, 0, 0)
+            try:
+                win32gui.PostMessage(self.hwnd, WM_CLOSE, 0, 0)
+            except pywintypes.error as error:  # the window ended already
+                log.debug("power events: the window is gone: %s", error)
             self._thread.join(STARTUP_TIMEOUT_S)
 
     def _on_power(self, hwnd: int, message: int, wparam: int, lparam: int) -> bool:
@@ -88,7 +95,19 @@ class PowerWatcher:
             log.exception("power events: the handler failed")
         return HANDLED
 
+    def _on_end_session(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:
+        # WM_ENDSESSION with wparam TRUE: the session ends (logoff or shutdown). Windows ends
+        # the process when this returns, so the handler stops the app and waits for the
+        # LED release first (for a limited time).
+        if wparam and self._end_session_callback is not None:
+            try:
+                self._end_session_callback()
+            except Exception:  # noqa: BLE001  the session ends anyway
+                log.exception("power events: the end-of-session handler failed")
+        return 0
+
     def _run(self) -> None:
+        hwnd = notification = None  # set in the order that the start makes them
         try:
             import win32api
             import win32gui
@@ -101,16 +120,20 @@ class PowerWatcher:
             window_class = win32gui.WNDCLASS()
             window_class.lpszClassName = f"{WINDOW_CLASS}.{uuid.uuid4().hex}"  # unique for each watcher
             window_class.hInstance = win32api.GetModuleHandle(None)
-            window_class.lpfnWndProc = {WM_POWERBROADCAST: self._on_power, WM_CLOSE: on_close}
+            window_class.lpfnWndProc = {WM_POWERBROADCAST: self._on_power, WM_CLOSE: on_close,
+                                        WM_QUERYENDSESSION: lambda *args: True,  # the session may end
+                                        WM_ENDSESSION: self._on_end_session}
             atom = win32gui.RegisterClass(window_class)
             # A top-level window that is never shown: it gets the power broadcasts.
-            self.hwnd = win32gui.CreateWindow(atom, WINDOW_CLASS, 0, 0, 0, 0, 0, 0, 0,
-                                              window_class.hInstance, None)
-            notification = _register_display_state(self.hwnd)
+            hwnd = win32gui.CreateWindow(atom, WINDOW_CLASS, 0, 0, 0, 0, 0, 0, 0, window_class.hInstance, None)
+            notification = _register_display_state(hwnd)
+            only_from_this_level(hwnd)
         except Exception:  # noqa: BLE001  without this window the app still works
             log.exception("power events: cannot listen; the LEDs are taken again only by the interval")
+            _close_window(hwnd, notification)
             self._started.set()
             return
+        self.hwnd = hwnd  # only a window that listens: stop() closes it
         self._started.set()
         log.info("power events: listening for display on and resume")
         try:
@@ -118,6 +141,18 @@ class PowerWatcher:
         finally:
             if notification:
                 _user32().UnregisterPowerSettingNotification(notification)
+
+
+def _close_window(hwnd: int | None, notification: int | None) -> None:
+    if notification:
+        _user32().UnregisterPowerSettingNotification(notification)
+    if hwnd:
+        import win32gui
+
+        try:
+            win32gui.DestroyWindow(hwnd)
+        except Exception:  # noqa: BLE001  the window ends with its thread anyway
+            log.debug("power events: the window could not be closed", exc_info=True)
 
 
 def _user32() -> Any:
@@ -128,6 +163,23 @@ def _user32() -> Any:
     return user32
 
 
+# Messages that a process with lower rights must not send to this window of the admin
+# app: a forged WM_POWERBROADCAST carries an address that the handler reads, and a
+# WM_CLOSE or WM_ENDSESSION would end the watch or the app. The real ones come from
+# Windows, or from this process.
+FILTERED_MESSAGES = (WM_POWERBROADCAST, WM_CLOSE, WM_QUERYENDSESSION, WM_ENDSESSION)
+MSGFLT_DISALLOW = 2
+
+
+def only_from_this_level(hwnd: int, user32: Any = None) -> None:
+    user32 = user32 or ctypes.WinDLL("user32", use_last_error=True)
+    user32.ChangeWindowMessageFilterEx.restype = wintypes.BOOL
+    user32.ChangeWindowMessageFilterEx.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.DWORD, ctypes.c_void_p]
+    for message in FILTERED_MESSAGES:
+        if not user32.ChangeWindowMessageFilterEx(hwnd, message, MSGFLT_DISALLOW, None):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
 def _register_display_state(hwnd: int) -> int | None:
     guid = (ctypes.c_ubyte * 16).from_buffer_copy(GUID_CONSOLE_DISPLAY_STATE.bytes_le)
     handle = _user32().RegisterPowerSettingNotification(hwnd, ctypes.byref(guid), DEVICE_NOTIFY_WINDOW_HANDLE)
@@ -136,8 +188,9 @@ def _register_display_state(hwnd: int) -> int | None:
     return handle
 
 
-def watch(on_wake: Callable[[], None]) -> Callable[[], None]:
-    """Start listening. Returns the function that stops it. Not Windows: nothing to do."""
+def watch(on_wake: Callable[[], None], on_end_session: Callable[[], None] | None = None) -> Callable[[], None]:
+    """Start listening. Returns the function that stops it. Not Windows: nothing to do.
+    `on_end_session` runs at logoff or shutdown, before Windows ends the process."""
     if sys.platform != "win32":
         return lambda: None
-    return PowerWatcher(on_wake).stop
+    return PowerWatcher(on_wake, on_end_session).stop

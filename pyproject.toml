@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 dependencies = ["jmespath==1.1.0", "pywin32==312; sys_platform == 'win32'", "tzdata==2026.6; sys_platform == 'win32'"]
 
 [project.scripts]
-alert-colors = "alert_colors.cli:main"
+alert-colors = "alert_colors.hardening:main"  # hardening before ssl loads
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -19,6 +19,17 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 alert_colors = ["tuner.html"]
+
+[tool.ruff]
+# tests/test_lint.py runs `ruff check` with the tests, so the build stops on an issue.
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Obvious issues only: pycodestyle errors and warnings, pyflakes (unused names,
+# undefined names), bugbear (likely bugs), blind except, pylint errors.
+select = ["E", "W", "F", "B", "BLE", "PLE"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]

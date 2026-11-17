@@ -96,8 +96,8 @@ list. If another app is above it, Armoury Crate gives the LEDs to that app,
 and the PC LEDs do not show the alert status.
 
 Note: After the install, and after each start of the app, the PC LEDs (ASUS
-Aura) can need approximately 30 s before they change. The ASUS SDK first scans
-all devices. The Razer devices change at once.
+Aura) change only after the first device scan of the ASUS SDK, which is slow.
+The Razer devices change at once.
 
 If your PC has only one lighting system, name its module in the install command:
 `setup.cmd install -Lighting razer_chroma` or `setup.cmd install -Lighting aura_sdk`.
@@ -239,7 +239,8 @@ config.toml                  all settings (the defaults); examples\sources\: a b
 requirements-build.txt       exact build versions with SHA-256 hashes
 packaging\                   PyInstaller spec and exe metadata
 src\alert_colors\            the app
-tests\                       unit tests (every build runs them)
+tests\                       unit tests and the Ruff lint check (every build runs them)
+specs\                       the specs of larger changes
 docs\                        the full setup guide and the screenshot
 ```
 

@@ -146,7 +146,8 @@ def test_an_old_ubilling_region_wins_over_the_oblast_name():
 def test_alerts_in_ua_takes_the_region_ids(monkeypatch):
     monkeypatch.setenv("ALERTS_IN_UA_TOKEN", "t")
     source = SOURCES.create("alerts_in_ua", {"vars": {"region_id": "155", "district_id": "38", "oblast_id": "3"}})
-    assert (source.variables["city_uid"], source.variables["raion_uid"], source.variables["oblast_uid"])         == ("155", "38", "3")
+    ids = (source.variables["city_uid"], source.variables["raion_uid"], source.variables["oblast_uid"])
+    assert ids == ("155", "38", "3")
 
 
 # ---- ukrainealarm (official) and its keyless mirror siren_pp_ua -----------

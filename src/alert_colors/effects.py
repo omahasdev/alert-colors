@@ -57,7 +57,17 @@ class Param:
             if raw not in self.choices:
                 raise ValueError(f"{self.name}: {raw!r} is not one of {self.choices}")
             return raw
-        value = int(raw) if self.kind == INT else float(raw)
+        # NaN passes every comparison with the limits, and int() of an infinite number
+        # raises OverflowError: refuse both before the conversion.
+        if isinstance(raw, float) and not math.isfinite(raw):
+            raise ValueError(f"{self.name}: {raw!r} is not a finite number")
+        try:
+            value = int(raw) if self.kind == INT else float(raw)
+            finite = math.isfinite(value)
+        except OverflowError as error:  # an integer too large for a float
+            raise ValueError(f"{self.name}: {raw!r} is too large") from error
+        if not finite:  # a text such as "nan"
+            raise ValueError(f"{self.name}: {raw!r} is not a finite number")
         if self.min is not None and value < self.min or self.max is not None and value > self.max:
             raise ValueError(f"{self.name}: {value} is outside {self.min}..{self.max}")
         return value

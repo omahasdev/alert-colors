@@ -17,6 +17,7 @@ LOOPBACK_URL = "http://127.0.0.1:54235/razer/chromasdk"
     "data:application/json,{}",
     "http://example.com/",            # http needs allow_http
     "https://user:pw@example.com/",   # credentials in the URL
+    "https://user@example.com/",      # a user name only, no password
 ])
 def test_refused_urls(url):
     with pytest.raises(UnsafeRequestError):
@@ -64,7 +65,7 @@ def test_response_size_limit(monkeypatch):
         http.request_json("https://example.com/", timeout_s=1, policy=NetworkPolicy(max_response_bytes=limit))
 
 
-@pytest.mark.parametrize("name", ["..\escape.log", "C:\Windows\System32\evil.log"])
+@pytest.mark.parametrize("name", [r"..\escape.log", r"C:\Windows\System32\evil.log"])
 def test_log_file_must_stay_in_config_folder(tmp_path, name):
     app = App(tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8")), tmp_path)
     with pytest.raises(ValueError, match="inside"):
