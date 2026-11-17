@@ -82,10 +82,12 @@ a timeout (at least one "no network"), the app:
 - Does not skip a source with a "no network" error: the wait above paces its tries. A source that timed out keeps its doubled skip
 - Sends one request for each poll, each time to the source that waited longest, until a source works again. Thus a slow failed lookup does not delay the next try. A server answer that is not a network failure (for example HTTP 500) lets the round try the next source
 - Writes a warning when the outage starts (one line for each source, and one for the app), again every 5 minutes while it lasts, and one line when the data comes back
+- Caps each connect to `offline_retry_s`, so a source this PC cannot reach fails within the gap instead of after its full timeout; a source that answers keeps the full read time, so a slow-but-working link is not cut short
 
 On Windows, the app also listens for network changes (an IPv4 address is added
 or removed). If the fetches fail at that time, the app fetches at once and
-clears the skips of the failed sources. The skip after HTTP 429 or a refused
+clears the skips of the failed sources. If a fetch is hung at that moment, the
+app stops it, so the retry does not wait for the request deadline. The skip after HTTP 429 or a refused
 token stays. The app does this at most once each `offline_retry_s` or
 `backoff_max_s`, the larger one. While the fetches succeed, a network change
 does nothing.

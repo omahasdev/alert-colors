@@ -2,7 +2,9 @@
 
 Why: after a network outage, the poller can wait up to its backoff before the
 next fetch. When Wi-Fi or a cable connects again, the PC gets its address, and
-this event lets the daemon fetch at once (see `Daemon.network_changed`).
+this event lets the daemon fetch at once (see `Daemon.network_changed`). If a
+fetch is hung on a dead socket at that moment, the daemon stops it, so the
+retry does not wait for the request deadline.
 
 `NotifyAddrChange(NULL, NULL)` of iphlpapi blocks until the next change. So the
 watcher thread is a daemon thread that cannot be woken: `stop()` only stops the

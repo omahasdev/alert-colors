@@ -67,6 +67,10 @@ class NameResolutionError(OSError):
     """DNS gave no address for the host. Often, this PC has no network."""
 
 
+class NetworkChangedError(OSError):
+    """A request was stopped so the caller retries at once after the network changed."""
+
+
 # The network of this PC is down or has no route: the request did not leave the PC.
 _NO_ROUTE_ERRNOS = frozenset({errno.ENETDOWN, errno.ENETUNREACH, errno.EHOSTUNREACH})
 
@@ -337,22 +341,54 @@ _OPENER = urllib.request.build_opener(_NoRedirect(), _LazyTLSHandler())
 # for days. When the limit passes, the sockets of the request are shut down.
 REQUEST_DEADLINE_FACTOR = 3
 _request = threading.local()  # the sockets of the request that runs on this thread
+_fast_fail = threading.local()  # a shorter cap on the connect while this PC has no network
+
+
+def fast_fail(seconds: float | None) -> None:
+    """Cap the connect of each request on this thread to `seconds` (None: no cap). The daemon sets
+    it while this PC has no network, so a host it cannot reach fails within the retry gap. A host
+    that answers keeps the full read time, so a slow-but-working link is not cut short."""
+    _fast_fail.seconds = seconds
 
 
 class _DeadlineSockets:
-    """Records the sockets of one request; shut_down() ends a read that is still blocked."""
+    """Records the sockets of one request; shut_down() ends a read that is still blocked.
 
-    def __init__(self) -> None:
+    `expired`: the request deadline passed. `aborted`: a network change asked for an
+    at-once retry, so a fetch that hangs now does not wait for its deadline.
+    """
+
+    def __init__(self, read_timeout: float | None = None) -> None:
         self.sockets: list[socket.socket] = []
         self.expired = False
+        self.aborted = False
+        self.read_timeout = read_timeout  # the full read time, restored after connect when the cap is on
 
-    def shut_down(self) -> None:
-        self.expired = True
+    def shut_down(self, aborted: bool = False) -> None:
+        if aborted:
+            self.aborted = True
+        else:
+            self.expired = True
         for sock in list(self.sockets):
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass  # closed already
+
+
+# The in-flight requests, so another thread (the network watcher) can stop a hung fetch.
+_active_lock = threading.Lock()
+_active_requests: set[_DeadlineSockets] = set()
+
+
+def abort_active_requests() -> int:
+    """Stop every in-flight request so a fetch that blocks now returns at once. Called from
+    another thread after the network changes, so the poller retries without the full deadline."""
+    with _active_lock:
+        active = list(_active_requests)
+    for deadline in active:
+        deadline.shut_down(aborted=True)
+    return len(active)
 
 
 def _record_socket(sock: socket.socket) -> socket.socket:
@@ -361,6 +397,10 @@ def _record_socket(sock: socket.socket) -> socket.socket:
         current.sockets.append(sock)
         if current.expired:  # the connect used the whole time: no read starts
             current.shut_down()
+        elif current.aborted:  # a network change asked to retry now
+            current.shut_down(aborted=True)
+        elif current.read_timeout is not None:  # connected: reads get the full time, not the connect cap
+            sock.settimeout(current.read_timeout)
     return sock
 
 
@@ -497,27 +537,40 @@ def request_json(
     all_headers.update(headers or {})
     req = urllib.request.Request(url, data=data, method=method, headers=all_headers)
     req.network_policy = policy  # for the address check of a plain http connection
-    deadline = _DeadlineSockets()
-    timer = threading.Timer(timeout_s * REQUEST_DEADLINE_FACTOR, deadline.shut_down)
+    cap = getattr(_fast_fail, "seconds", None)
+    # While offline, cap the connect so a host this PC cannot reach fails fast; a host that answers
+    # keeps the full read time, so a slow-but-working link is not cut short and a failover does not stall.
+    connect_timeout = timeout_s if not cap else min(timeout_s, cap)
+    total_deadline = timeout_s * REQUEST_DEADLINE_FACTOR
+    deadline = _DeadlineSockets(read_timeout=timeout_s if cap else None)
+    timer = threading.Timer(total_deadline, deadline.shut_down)
     timer.daemon = True
     _request.sockets = deadline
+    with _active_lock:
+        _active_requests.add(deadline)
     timer.start()
     try:
-        with _opener_for(url, policy).open(req, timeout=timeout_s) as response:
+        with _opener_for(url, policy).open(req, timeout=connect_timeout) as response:
             raw = response.read(policy.max_response_bytes + 1)
     except urllib.error.HTTPError as error:
         if error.code == HTTP_TOO_MANY_REQUESTS:
             raise RateLimitedError(_retry_after_s(error)) from error
         raise
     except (OSError, http.client.HTTPException) as error:
+        if deadline.aborted:
+            raise NetworkChangedError("the request was stopped to retry after the network changed") from error
         if deadline.expired:
-            raise TimeoutError(f"no complete answer within {timeout_s * REQUEST_DEADLINE_FACTOR:.0f} s") from error
+            raise TimeoutError(f"no complete answer within {total_deadline:.0f} s") from error
         raise
     finally:
         timer.cancel()
+        with _active_lock:
+            _active_requests.discard(deadline)
         _request.sockets = None
+    if deadline.aborted:  # a late abort after a clean EOF: the body may be truncated, so retry
+        raise NetworkChangedError("the request was stopped to retry after the network changed")
     if deadline.expired:
-        raise TimeoutError(f"no complete answer within {timeout_s * REQUEST_DEADLINE_FACTOR:.0f} s")
+        raise TimeoutError(f"no complete answer within {total_deadline:.0f} s")
     if len(raw) > policy.max_response_bytes:
         raise UnsafeRequestError(f"response is larger than {policy.max_response_bytes} bytes")
     return json.loads(raw) if raw else None

@@ -40,7 +40,7 @@ class DaemonSettings:
     stale_after_s: float
     frame_interval_s: float
     backoff_max_s: float = 0.0  # 0: no backoff, always wait poll_interval_s
-    # This PC has no network: try again this soon, with no backoff (specs/001-offline-recovery).
+    # This PC has no network: try again this soon, with no backoff.
     offline_retry_s: float = 0.0  # 0: off, the backoff applies to these errors too
     brightness: float = FULL_BRIGHTNESS  # global factor for every color
     # A vendor app can take the LEDs back without a message (see power_events.py).
@@ -65,6 +65,8 @@ class Daemon:
     tuning: TuningWatcher | None = None
     monotonic: Callable[[], float] = time.monotonic
     wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    abort_requests: Callable[[], object] = lambda: None  # stop an in-flight fetch on a network change
+    fast_fail: Callable[[float | None], object] = lambda _s: None  # cap the connect while offline
     _sample: _Sample | None = field(default=None, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _reclaim_until: float = field(default=0.0, init=False)  # monotonic; set by request_reclaim()
@@ -90,6 +92,10 @@ class Daemon:
     # ---- data side -------------------------------------------------------
     def poll_once(self) -> float | None:
         """Fetch once. Returns None on success, else the server's retry hint (or 0)."""
+        # After a no-network round, cap the connect to the retry gap so a host this PC cannot reach
+        # fails fast; a host that answers keeps the full read time. The first offline round is not capped.
+        cap = self.settings.offline_retry_s if (self._last_offline and self.settings.offline_retry_s > 0) else None
+        self.fast_fail(cap)
         try:
             status = self.source.fetch()
         except Exception as error:  # noqa: BLE001  any source failure -> keep old sample
@@ -113,6 +119,8 @@ class Daemon:
             else:
                 log.debug("source %s failed: %s", self.source.name, error)
             return float(getattr(error, "retry_after_s", None) or 0)
+        finally:
+            self.fast_fail(None)
         now = self.monotonic()
         if self._offline_since is not None:
             log.info("source %s works again after %.0f s", self.source.name,
@@ -123,7 +131,8 @@ class Daemon:
         return None
 
     def network_changed(self) -> None:
-        """A network address of this PC changed: while the fetches fail, fetch now.
+        """A network address of this PC changed: while the fetches fail, fetch now, and stop a
+        fetch that hangs so the retry does not wait for the request deadline.
 
         Another thread calls it. It does nothing while the fetches succeed, or
         after HTTP 429 (the server gave the wait). It wakes the poller at most
@@ -141,6 +150,7 @@ class Daemon:
         retry_now = getattr(self.source, "retry_now", None)
         if retry_now is not None:
             retry_now()
+        self.abort_requests()  # stop a fetch that hangs now: the retry starts without its deadline
         log.info("the network changed: fetching the source now")
         self._wake.set()
 

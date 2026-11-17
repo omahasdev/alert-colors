@@ -722,3 +722,13 @@ def test_preview_tells_the_console_handler_when_the_leds_are_released(monkeypatc
     app, _scene = preview_app(monkeypatch, outputs)
     assert cli._preview(app, argparse.Namespace(scene="test", seconds=SHORT_S)) == 0
     assert outputs[0].closed == 1 and seen["finished"].is_set() and seen["set_before_close"] is False
+
+
+def test_the_built_daemon_aborts_requests_on_a_network_change():
+    """config wires the daemon to http.abort_active_requests, so a network change can stop a
+    hung fetch."""
+    from alert_colors import http
+
+    daemon = real_app().daemon(dry_run=True)
+    assert daemon.abort_requests is http.abort_active_requests
+    assert daemon.fast_fail is http.fast_fail

@@ -1,4 +1,4 @@
-"""Fast recovery after a network outage (specs/001-offline-recovery)."""
+"""Fast recovery after a network outage."""
 import copy
 import errno
 import logging
@@ -122,7 +122,7 @@ def skips(source, now):
 
 
 def test_the_outage_shape_gives_no_skip_for_no_network_and_keeps_the_timeout_skip():
-    """A1: the primary and one fallback: no DNS; the other fallback: a timeout."""
+    """The primary and one fallback: no DNS; the other fallback: a timeout."""
     source, clock = chain([OK, NO_DNS], [SLOW], [NO_DNS])
     at(source, clock, 0)
     with pytest.raises(NameResolutionError):  # too early to switch: the primary only
@@ -140,7 +140,6 @@ def test_the_outage_shape_gives_no_skip_for_no_network_and_keeps_the_timeout_ski
 
 
 def test_the_data_comes_back_at_the_next_short_try():
-    """A2"""
     source, clock = chain([OK, NO_DNS, NO_DNS, OK], [SLOW], [NO_DNS])
     at(source, clock, 0)
     for t in (1, 1 + OFFLINE_S):
@@ -150,7 +149,6 @@ def test_the_data_comes_back_at_the_next_short_try():
 
 
 def test_offline_retry_0_uses_the_normal_backoff_skips():
-    """A4"""
     source, clock = chain([OK, NO_DNS], [NO_DNS], offline_retry_s=0)
     at(source, clock, 0)
     with pytest.raises(NameResolutionError):
@@ -165,7 +163,7 @@ def test_offline_retry_0_uses_the_normal_backoff_skips():
 
 
 def test_timeouts_only_keep_the_doubled_skip():
-    """A3: a slow server is not asked more often."""
+    """A slow server is not asked more often."""
     source, clock = chain([OK, SLOW], [SLOW])
     at(source, clock, 0)
     with pytest.raises(urllib.error.URLError):
@@ -178,7 +176,7 @@ def test_timeouts_only_keep_the_doubled_skip():
 
 
 def test_one_dead_host_while_a_fallback_works_switches_at_after_s_and_doubles_after():
-    """A3: the switch time is the same as with offline_retry_s = 0."""
+    """The switch time is the same as with offline_retry_s = 0."""
     def switch_time(offline_retry_s):
         source, clock = chain([OK, NO_DNS], [OK], offline_retry_s=offline_retry_s)
         at(source, clock, 0)
@@ -203,7 +201,6 @@ def test_one_dead_host_while_a_fallback_works_switches_at_after_s_and_doubles_af
 
 
 def test_http_429_keeps_its_skip_and_is_no_offline_round():
-    """A3"""
     source, clock = chain([OK, RateLimitedError(20)], [NO_DNS])
     at(source, clock, 0)
     with pytest.raises(RateLimitedError):
@@ -321,7 +318,7 @@ def poll_delays(results, polls, offline_retry_s=OFFLINE_S, woken=()):
 
 
 def test_no_network_waits_offline_retry_s_and_the_backoff_does_not_grow():
-    """A1 for the daemon: then a timeout starts the backoff from the start."""
+    """A timeout starts the backoff from the start."""
     wake = poll_delays([NO_DNS, NO_DNS, NO_DNS, SLOW, SLOW, OK], polls=6)
     assert wake.delays == [OFFLINE_WAIT_S] * 3 + [2 * POLL_S, 4 * POLL_S, POLL_S]
 
@@ -332,14 +329,12 @@ def test_an_offline_round_of_failover_waits_offline_retry_s():
 
 
 def test_other_errors_keep_the_backoff():
-    """A3"""
     wake = poll_delays([AllSourcesFailedError("x", no_network=False)], polls=4)
     assert wake.delays == [2 * POLL_S, 4 * POLL_S, BACKOFF_MAX_S, BACKOFF_MAX_S]
     assert poll_delays([RateLimitedError(5)], polls=2).delays == [5, 5]
 
 
 def test_offline_retry_0_uses_the_normal_backoff_for_no_network():
-    """A4"""
     wake = poll_delays([NO_DNS], polls=4, offline_retry_s=0)
     assert wake.delays == [2 * POLL_S, 4 * POLL_S, BACKOFF_MAX_S, BACKOFF_MAX_S]
 
@@ -363,7 +358,6 @@ def test_the_daemon_logs_the_start_and_the_end_of_an_outage(caplog):
 
 
 def test_stale_data_still_gives_unknown_during_an_outage():
-    """A3"""
     daemon, clock = daemon_with([OK, NO_DNS])
     daemon.poll_once()
     clock.t = STALE_S - 1
@@ -412,7 +406,7 @@ class ClockWake:
 
 
 def recovery_s(back_at, offline_retry_s, lookup_s):
-    """The time from "network back" to data, for the outage shape of A1."""
+    """The time from "network back" to data, for a primary-no-DNS outage shape."""
     clock = Clock()
     members = [Member(TimedSource("primary", clock, back_at, NO_DNS, lookup_s))] + [
         Member(TimedSource(name, clock, back_at, error, cost), poll_interval_s=FALLBACK_POLL_S)
@@ -436,7 +430,7 @@ BACK_TIMES = range(40, 400, 7)
 
 @pytest.mark.parametrize("lookup_s", [0.05, REQUEST_TIMEOUT_S])  # a fast or a slow failed lookup
 def test_the_data_comes_back_soon_after_the_network(lookup_s):
-    """A2 with time: the limit is one request in progress plus offline_retry_s."""
+    """The limit is one request in progress plus offline_retry_s."""
     new = [recovery_s(t, OFFLINE_S, lookup_s) for t in BACK_TIMES]
     old = [recovery_s(t, 0, lookup_s) for t in BACK_TIMES]
     assert max(new) <= max(lookup_s, REQUEST_TIMEOUT_S) + OFFLINE_S + ONLINE_FETCH_S
@@ -467,7 +461,7 @@ def test_with_fast_lookups_the_data_comes_back_within_offline_retry_s():
 
 
 def test_the_offline_wait_is_never_longer_than_the_first_backoff_step():
-    """A3: without backoff_max_s, the first wait after a failure is poll_interval_s."""
+    """Without backoff_max_s, the first wait after a failure is poll_interval_s."""
     daemon, _clock = daemon_with([NO_DNS])
     daemon.settings = DaemonSettings(poll_interval_s=POLL_S, stale_after_s=STALE_S, frame_interval_s=0.1,
                                      offline_retry_s=OFFLINE_S)  # backoff_max_s not set
@@ -501,7 +495,6 @@ def test_while_offline_a_server_error_lets_the_round_go_on():
 
 # ---- daemon: network changes ---------------------------------------------------
 def test_a_network_change_while_data_flows_does_nothing():
-    """A5"""
     daemon, _clock = daemon_with([OK])
     daemon.poll_once()
     daemon.network_changed()
@@ -518,7 +511,7 @@ def test_a_network_change_while_fetches_fail_fetches_now():
 
 
 def test_a_burst_of_network_changes_wakes_once_each_gap():
-    """A5: the gap is max(offline_retry_s, backoff_max_s)."""
+    """The gap is max(offline_retry_s, backoff_max_s)."""
     daemon, clock = daemon_with([SLOW])
     daemon.poll_once()
     for t in (0, 1, 2, BACKOFF_MAX_S - 1):
@@ -644,7 +637,7 @@ def test_the_shipped_config_has_the_key():
 
 # ---- log volume and retry interval during an outage ----------------------------------
 def test_a_long_outage_logs_each_source_once_also_a_source_that_times_out(caplog):
-    """The A1 shape for 10 minutes: one warning for each source at the start, not one each try."""
+    """For 10 minutes: one warning for each source at the start, not one each try."""
     source, clock = chain([OK, NO_DNS], [SLOW], [NO_DNS])
     at(source, clock, 0)
     caplog.set_level(logging.WARNING, logger="alert_colors.sources.failover")
@@ -704,7 +697,7 @@ def test_a_dead_primary_host_is_logged_again_while_a_fallback_works(caplog):
 # ---- a server answer means the network works -----------------------------------------
 def test_a_server_error_of_a_fallback_makes_the_round_not_offline():
     """The primary host does not resolve, but a fallback server answers HTTP 500: the network
-    works, so the normal backoff and the log of each failure apply (spec, rule 2 and A3)."""
+    works, so the normal backoff and the log of each failure apply."""
     import urllib.error
 
     server_error = urllib.error.HTTPError("https://example.invalid", 500, "Error", None, None)
@@ -746,13 +739,13 @@ def test_on_another_system_the_network_watcher_starts_nothing(monkeypatch, caplo
 # ---- a wake during a fetch, and after a recovery ---------------------------------
 @pytest.mark.parametrize(("answer", "cleared"), [(OK, 1), (RateLimitedError(30), 1), (NO_DNS, 0), (SLOW, 0)])
 def test_a_wake_that_came_during_a_fetch_is_dropped_after_data_or_429(answer, cleared):
-    """A5: after data or HTTP 429, the next request waits as usual. After a failure the
+    """After data or HTTP 429, the next request waits as usual. After a failure the
     wake stays: the network can be back."""
     assert poll_delays([answer], polls=1).cleared == cleared
 
 
 def test_after_a_recovery_a_network_change_does_nothing():
-    """A5 after an outage: the data flows again, so a change gives no extra request."""
+    """After an outage: the data flows again, so a change gives no extra request."""
     daemon, _clock = daemon_with([SLOW, OK])
     daemon.poll_once()
     daemon.poll_once()
@@ -1073,7 +1066,7 @@ def test_a_socket_recorded_after_the_limit_is_shut_down_at_once():
 
 # ---- a fallback keeps its retry skip; a success clears a source's marks -------------------
 def test_a_failed_fallback_is_not_fetched_again_before_its_skip_time():
-    """A3: a fallback keeps its retry skip, as the primary does."""
+    """A fallback keeps its retry skip, as the primary does."""
     source, clock = chain([SLOW, SLOW, SLOW], [SLOW, OK], [OK])
     with pytest.raises(OSError):
         at(source, clock, 0)  # too early to reach the fallbacks
@@ -1151,3 +1144,148 @@ def test_a_body_that_completes_just_as_the_deadline_fires_is_still_a_timeout(mon
     monkeypatch.setattr(http.threading, "Timer", FiredTimer)
     with pytest.raises(TimeoutError, match="no complete answer"):
         http.local_request_json("http://127.0.0.1:9/", timeout_s=2)
+
+
+# ---- a network change stops a hung fetch at once --------------------------------
+def test_a_network_change_aborts_a_hung_request_without_its_deadline():
+    """abort_active_requests() shuts the in-flight socket, so a fetch that hangs returns at once
+    with NetworkChangedError, instead of waiting for the full request deadline."""
+    import time
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    held = []
+
+    def accept_and_hold():
+        conn, _ = server.accept()
+        held.append(conn)  # accept, then never answer: the client blocks on the read
+
+    accepter = threading.Thread(target=accept_and_hold, daemon=True)
+    accepter.start()
+    result = {}
+
+    def fetch():
+        start = time.monotonic()
+        try:
+            http.local_request_json(f"http://127.0.0.1:{port}/", timeout_s=30)  # deadline 90 s
+        except Exception as error:  # noqa: BLE001
+            result["error"] = error
+        result["elapsed"] = time.monotonic() - start
+
+    fetcher = threading.Thread(target=fetch, daemon=True)
+    fetcher.start()
+    stop_at = time.monotonic() + 5
+    while not http._active_requests and time.monotonic() < stop_at:
+        time.sleep(0.02)  # wait until the request is in flight
+    aborted = http.abort_active_requests()
+    fetcher.join(timeout=5)
+    for conn in held:
+        conn.close()
+    server.close()
+    assert aborted >= 1
+    assert isinstance(result.get("error"), http.NetworkChangedError)
+    assert result["elapsed"] < 5  # far below the 90 s deadline
+
+
+def test_abort_active_requests_is_safe_with_nothing_in_flight():
+    assert http.abort_active_requests() == 0
+
+
+def test_a_network_change_while_fetches_fail_aborts_the_in_flight_fetch():
+    daemon, _clock = daemon_with([SLOW])
+    calls = []
+    daemon.abort_requests = lambda: calls.append(1)
+    daemon.poll_once()
+    daemon.network_changed()
+    assert calls == [1] and daemon._wake.is_set()
+
+
+def test_a_network_change_while_data_flows_does_not_abort():
+    daemon, _clock = daemon_with([OK])
+    calls = []
+    daemon.abort_requests = lambda: calls.append(1)
+    daemon.poll_once()
+    daemon.network_changed()
+    assert calls == []
+
+
+# ---- offline: the cap shortens the connect, not the read ------------------------
+def test_the_offline_cap_shortens_the_connect_but_keeps_the_read_time(monkeypatch):
+    """While offline, the cap bounds the connect (a host this PC cannot reach fails fast), but a
+    host that answers keeps the full read time, so a slow-but-working link is not cut short."""
+    import time
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def accept_wait_then_answer():
+        conn, _ = server.accept()
+        conn.recv(4096)
+        # 4 s is longer than the connect cap and its deadline (1 s and 3 s), but shorter than the
+        # normal read deadline (timeout_s=10 -> 30 s): a request capped as a whole would cut this off.
+        time.sleep(4)
+        conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{"ok": true}')
+        conn.close()
+
+    threading.Thread(target=accept_wait_then_answer, daemon=True).start()
+    seen = {}
+    real_create = socket.create_connection
+
+    def spy(address, timeout=None, *args, **kwargs):
+        seen["connect_timeout"] = timeout
+        return real_create(address, timeout, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", spy)
+    http.fast_fail(1.0)  # cap the connect to 1 s; the read keeps timeout_s
+    try:
+        result = http.local_request_json(f"http://127.0.0.1:{port}/", timeout_s=10)
+    finally:
+        http.fast_fail(None)
+        server.close()
+    assert result == {"ok": True}  # the slow answer (4 s) was not cut off
+    assert seen["connect_timeout"] == 1.0  # the connect used the cap
+
+
+def test_poll_once_caps_the_fetch_only_after_an_offline_round():
+    daemon, _clock = daemon_with([NO_DNS])  # every fetch says no network
+    caps = []
+    daemon.fast_fail = lambda seconds: caps.append(seconds)
+    daemon.poll_once()  # the first offline round keeps the full timeout to detect it
+    daemon.poll_once()  # the next round caps the fetch to the retry gap
+    assert caps == [None, None, OFFLINE_S, None]
+
+
+def test_poll_once_does_not_cap_the_fetch_while_data_flows():
+    daemon, _clock = daemon_with([OK])
+    caps = []
+    daemon.fast_fail = lambda seconds: caps.append(seconds)
+    daemon.poll_once()
+    daemon.poll_once()
+    assert caps == [None, None, None, None]
+
+
+def test_a_body_read_after_an_abort_raises_instead_of_returning_data(monkeypatch):
+    """An abort can land after a clean EOF (no Content-Length), so the read returns without an
+    error but the body may be truncated. The request then raises NetworkChangedError, not the body."""
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _size):
+            http._request.sockets.aborted = True  # an abort shut the socket during the read
+            return b'{"ok": true}'
+
+    class Opener:
+        def open(self, req, timeout):  # noqa: A003
+            return Response()
+
+    monkeypatch.setattr(http, "_opener_for", lambda url, policy: Opener())
+    with pytest.raises(http.NetworkChangedError):
+        http.local_request_json("http://127.0.0.1:9/", timeout_s=5)

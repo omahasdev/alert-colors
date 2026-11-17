@@ -36,7 +36,7 @@ DEFAULT_VENDOR_POLL_S = 2.0
 DEFAULT_FAILOVER_AFTER_S = 30.0  # well below stale_after_s: the LEDs never show "unknown" first
 DEFAULT_FAILOVER_RETRY_S = 10.0  # below after_s: one timeout of the primary does not switch
 DEFAULT_FAILOVER_RETRY_MAX_S = 120.0
-DEFAULT_OFFLINE_RETRY_S = 3.0  # no network: a retry sends nothing to a server (specs/001-offline-recovery)
+DEFAULT_OFFLINE_RETRY_S = 3.0  # no network: a retry sends nothing to a server
 DEFAULT_FALLBACK_POLL_S = 10.0
 # Without [[failover.token_sources]]: the city-level services that need a token,
 # best first. Each one is used only after `setup.cmd token` saves its token.
@@ -259,6 +259,7 @@ class App:
 
     def daemon(self, dry_run: bool = False) -> Daemon:
         outputs = self.outputs(dry_run)
+        from . import http  # imported here: hardening has already run before ssl loads
         return Daemon(
             source=self.alert_source(),
             policy=self.policy(),
@@ -266,6 +267,8 @@ class App:
             outputs=outputs,
             settings=self.settings(),
             tuning=self.tuning_watcher(outputs),
+            abort_requests=http.abort_active_requests,
+            fast_fail=http.fast_fail,
         )
 
     def vendor_watch(self) -> tuple[list[str], float]:

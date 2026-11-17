@@ -18,7 +18,7 @@ Rules:
   its last status is given again.
 - A refused token (HTTP 401 or 403) is not a short outage: that source is
   skipped for `retry_max_s`, and the next source is used at once.
-- No network (specs/001-offline-recovery): when no source gave data, at least
+- No network: when no source gave data, at least
   one failed because the request never left this PC (see `http.no_network`),
   and each other one failed so or timed out, the round is offline. Then a
   source with a "no network" error is not skipped, and its failure count does

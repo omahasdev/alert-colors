@@ -16,7 +16,7 @@
 type = "siren_pp_ua"          # the fastest source without a key (checked 2026-11-08)
 poll_interval_s = 1           # each poll fetches only lastActionIndex (38 bytes); the mirror caches 1 s
 backoff_max_s = 60            # after errors (for example HTTP 429), wait up to this long
-offline_retry_s = 3           # this PC has no network (DNS fails): try again this soon; 0: use the backoff
+offline_retry_s = 3           # no network: try again this soon and cap the connect to it; 0: use the backoff
 stale_after_s = 180           # older data shows the "unknown" scene, never "clear"
 
 # The watched place. The default is the test region of the API: choose your
