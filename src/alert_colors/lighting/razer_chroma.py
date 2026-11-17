@@ -25,6 +25,13 @@ KEYBOARD = "keyboard"
 KEYBOARD_ROWS, KEYBOARD_COLUMNS = 6, 22  # the Chroma keyboard grid
 
 
+def _connection_lost(error: BaseException) -> bool:
+    """True when the session port refused or reset the connection: the session is gone, so
+    a reopen helps. A timeout is left to the backend retry gap, because a reopen can hang too."""
+    reason = getattr(error, "reason", error)  # urllib wraps the socket error in `reason`
+    return isinstance(reason, ConnectionError)
+
+
 @dataclass
 class RazerChromaBackend:
     url: str
@@ -67,6 +74,20 @@ class RazerChromaBackend:
         return {"effect": STATIC_EFFECT, "param": {"color": frame.color().to_bgr_int()}}
 
     def show(self, frame: Frame) -> None:
+        try:
+            self._send(frame)
+        except OSError as error:
+            if self._uri is None or not _connection_lost(error):
+                raise
+            # The Chroma SDK recycles the session port; a refused or reset connection means the
+            # session is gone. Drop it without a DELETE (that would block on the dead port) and
+            # reopen once, so a lost session does not blank the LEDs for the whole retry gap. A
+            # second failure falls through to the backend retry gap.
+            log.info("Razer Chroma session lost (%s): reopening", error)
+            self._uri, self._last = None, {}
+            self._send(frame)
+
+    def _send(self, frame: Frame) -> None:
         self._acquire()
         sent = False
         for device in self.devices:

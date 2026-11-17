@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -132,6 +133,7 @@ class BackendWorker:
                 return
 
     def _run(self, command: Frame | _Release | _Reclaim) -> bool:
+        start = time.monotonic()
         try:
             if isinstance(command, _Release):
                 self._backend.release()
@@ -141,11 +143,14 @@ class BackendWorker:
                 self._backend.show(command)
             return True
         except Exception as error:  # noqa: BLE001  report and retry later
-            log.error("backend %s failed, retry in %ss: %s", self.name, self._retry_s, error)
+            log.error("backend %s failed after %.1fs, retry in %ss: %s",
+                      self.name, time.monotonic() - start, self._retry_s, error)
             return False
 
     def _safe_release(self) -> None:
+        start = time.monotonic()
         try:
             self._backend.release()
         except Exception as error:  # noqa: BLE001
-            log.warning("backend %s release failed: %s", self.name, error)
+            log.warning("backend %s release failed after %.1fs: %s",
+                        self.name, time.monotonic() - start, error)

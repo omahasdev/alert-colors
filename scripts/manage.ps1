@@ -1025,6 +1025,11 @@ function Register-Task([bool]$NeedsAdmin) {
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable `
         -RestartCount $RestartCount -RestartInterval (New-TimeSpan -Minutes $RestartIntervalMinutes)
+    # Task Scheduler starts a task at priority 7 (below normal) by default. A below-normal process
+    # is denied CPU under normal desktop load. Then its threads freeze for seconds, the heartbeat to
+    # the Razer SDK is late, and the session drops. Priority 5 is the normal process priority class.
+    $NormalProcessPriority = 5
+    $settings.Priority = $NormalProcessPriority
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal `
         -Settings $settings -Description 'Air-raid alert status on RGB lighting' -Force | Out-Null
     Write-Output "Registered task $TaskName -> $InstallExe (run level: $runLevel)"

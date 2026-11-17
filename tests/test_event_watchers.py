@@ -5,6 +5,7 @@ snapshot alive: the Windows parts are fake modules and fake DLLs.
 """
 import ctypes
 import logging
+import re
 import sys
 import threading
 import types
@@ -144,7 +145,7 @@ def test_a_failed_release_after_an_error_is_logged(caplog):
         worker.show(frame_of(RED))
         assert wait_for(lambda: "release failed" in caplog.text)
         worker.close()
-    assert "backend fake release failed: cannot release" in caplog.text
+    assert re.search(r"backend fake release failed after [\d.]+s: cannot release", caplog.text)
     assert not worker._thread.is_alive()
 
 

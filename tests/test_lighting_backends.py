@@ -7,6 +7,7 @@ import importlib.util
 import logging
 import sys
 import types
+import urllib.error
 
 import pytest
 
@@ -42,12 +43,20 @@ def gradient():
 class FakeChroma:
     """Records each REST call; answers like the Chroma SDK server."""
 
-    def __init__(self, fail_delete=False):
+    def __init__(self, fail_delete=False, refuse_puts=0, timeout_puts=0):
         self.calls = []
         self.fail_delete = fail_delete
+        self.refuse_puts = refuse_puts    # the next N PUTs are refused (a recycled session)
+        self.timeout_puts = timeout_puts  # the next N PUTs hit the request deadline
 
     def __call__(self, url, method="GET", body=None, timeout_s=None):
         self.calls.append((method, url, body, timeout_s))
+        if method == "PUT" and self.refuse_puts > 0:
+            self.refuse_puts -= 1
+            raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+        if method == "PUT" and self.timeout_puts > 0:
+            self.timeout_puts -= 1
+            raise TimeoutError("no complete answer within 15 s")
         if method == "POST":
             return {"uri": SESSION_URI}
         if method == "DELETE" and self.fail_delete:
@@ -163,6 +172,31 @@ def test_razer_release_forgets_the_session_when_delete_fails(chroma):
         backend.release()
     backend.release()  # the session is gone: no second DELETE
     assert chroma.methods().count(("DELETE", SESSION_URI)) == 1
+
+
+def test_razer_reopens_and_resends_when_the_session_is_refused(chroma, caplog):
+    # The Chroma SDK recycles the session port: the next PUT is refused. The backend must
+    # reopen and resend the color at once, not go dark and not DELETE the dead session.
+    backend = razer()
+    backend.show(solid(RED))
+    chroma.refuse_puts = 1
+    with caplog.at_level(logging.INFO, logger=razer_chroma.__name__):
+        backend.show(solid(BLUE))
+    methods = chroma.methods()
+    assert ("DELETE", SESSION_URI) not in methods         # the dead session is dropped, not deleted
+    assert methods.count(("POST", BASE_URL)) == 2          # the session was reopened once
+    assert chroma.calls[-1][:3] == ("PUT", f"{SESSION_URI}/mouse", static(BLUE))  # BLUE reached the device
+    assert "session lost" in caplog.text
+
+
+def test_razer_does_not_reopen_on_a_timeout(chroma):
+    # A timeout is not a lost session: a reopen could hang too, so the backend retry gap handles it.
+    backend = razer()
+    backend.show(solid(RED))
+    chroma.timeout_puts = 1
+    with pytest.raises(TimeoutError):
+        backend.show(solid(BLUE))
+    assert chroma.methods().count(("POST", BASE_URL)) == 1  # not reopened
 
 
 def test_razer_describe_gives_the_sdk_version_and_the_devices(chroma):

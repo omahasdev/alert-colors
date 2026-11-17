@@ -25,6 +25,7 @@ import socket
 import ssl
 import threading
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -363,8 +364,11 @@ class _DeadlineSockets:
         self.expired = False
         self.aborted = False
         self.read_timeout = read_timeout  # the full read time, restored after connect when the cap is on
+        self.fired_at: float | None = None  # when shut_down first ran: to measure how late the Timer fired
 
     def shut_down(self, aborted: bool = False) -> None:
+        if self.fired_at is None:
+            self.fired_at = time.monotonic()
         if aborted:
             self.aborted = True
         else:
@@ -526,10 +530,14 @@ def request_json(
     timeout_s: float,
     policy: NetworkPolicy = REMOTE,
 ) -> Any:
+    times: dict[str, float | None] = {k: None for k in
+                                      ("start", "checked", "prestart", "started", "opened", "read_done")}
+    times["start"] = time.monotonic()
     if params:
         separator = "&" if urllib.parse.urlsplit(url).query else "?"
         url = url + separator + urllib.parse.urlencode(params, doseq=True)
     check_url(url, policy)
+    times["checked"] = time.monotonic()
     data = None if body is None else json.dumps(body).encode("utf-8")
     all_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if data is not None:
@@ -548,10 +556,14 @@ def request_json(
     _request.sockets = deadline
     with _active_lock:
         _active_requests.add(deadline)
+    times["prestart"] = time.monotonic()
     timer.start()
+    times["started"] = time.monotonic()  # Thread.start() waits for the new thread, so it needs the GIL
     try:
         with _opener_for(url, policy).open(req, timeout=connect_timeout) as response:
+            times["opened"] = time.monotonic()
             raw = response.read(policy.max_response_bytes + 1)
+            times["read_done"] = time.monotonic()
     except urllib.error.HTTPError as error:
         if error.code == HTTP_TOO_MANY_REQUESTS:
             raise RateLimitedError(_retry_after_s(error)) from error
@@ -564,6 +576,7 @@ def request_json(
         raise
     finally:
         timer.cancel()
+        _log_slow_request(url, total_deadline, times, deadline)
         with _active_lock:
             _active_requests.discard(deadline)
         _request.sockets = None
@@ -579,3 +592,38 @@ def request_json(
 def local_request_json(url: str, **kwargs: Any) -> Any:
     """For SDK servers on this PC: loopback addresses only."""
     return request_json(url, policy=LOOPBACK, **kwargs)
+
+
+# A healthy local request is milliseconds. A request slower than this gets a phase breakdown
+# in the log, so a stall shows where the time went: name resolution, the Timer start (which
+# waits for a new thread, so a long wait means the GIL is held), the open, or the read.
+SLOW_REQUEST_LOG_S = 1.0
+
+
+def _log_slow_request(url: str, total_deadline: float, times: dict[str, float | None],
+                      deadline: _DeadlineSockets) -> None:
+    """Log a phase breakdown when a request was slow. `times` holds the monotonic marks
+    `start`, `checked`, `prestart`, `started`, `opened`, `read_done`; `opened`/`read_done`
+    are None when the request failed before that phase."""
+    end = time.monotonic()
+    total = end - times["start"]
+    if total < SLOW_REQUEST_LOG_S:
+        return
+    host = urllib.parse.urlsplit(url).netloc.rpartition("@")[2] or url
+    opened, read_done = times["opened"], times["read_done"]
+    resolve = times["checked"] - times["start"]
+    thread_start = times["started"] - times["prestart"]  # a long wait here means the GIL is held
+    open_s = (opened if opened is not None else end) - times["started"]
+    read_s = 0.0 if opened is None else (read_done if read_done is not None else end) - opened
+    # The Timer should fire total_deadline after it started. A Timer that fires much later, or
+    # never, while the request runs long means its thread could not run (GIL starvation), not a
+    # socket that stayed blocked.
+    expected_fire = times["started"] + total_deadline
+    if deadline.fired_at is not None:
+        timer = f"timer {deadline.fired_at - expected_fire:+.1f}s vs its {total_deadline:.0f}s limit"
+    elif total > total_deadline:
+        timer = f"timer never fired in {total:.1f}s though its limit is {total_deadline:.0f}s (thread starved)"
+    else:
+        timer = "timer did not fire"
+    log.warning("slow request %s %.1fs: resolve=%.2fs thread_start=%.2fs open=%.2fs read=%.2fs; %s",
+                host, total, resolve, thread_start, open_s, read_s, timer)
